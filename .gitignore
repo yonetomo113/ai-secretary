@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# エディタ
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ユーザー固有の設定（テンプレートのまま配布するため）
+# 初回セットアップ後にこの2行をコメントアウトすれば git 管理できます
+# config/profile.md
+# config/tools.md
+
+# AI学習記録（個人データのため）
+memory/learnings.md
+memory/patterns.md
+
+# PARA: 運用中に生成されるデータ
+areas/
+projects/PRJ-*/
+archive/
