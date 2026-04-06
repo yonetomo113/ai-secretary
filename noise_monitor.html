@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="騒音モニター">
+  <title>騒音モニター</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --card: #13131a;
+      --border: #2a2a3a;
+      --accent: #00d4aa;
+      --danger: #ff4466;
+      --warn: #ffaa00;
+      --text: #e8e8f0;
+      --muted: #6666880;
+      --radius: 16px;
+      --safe: env(safe-area-inset-bottom, 0px);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+      -webkit-text-size-adjust: 100%;
+      overscroll-behavior: none;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      padding: env(safe-area-inset-top, 20px) 16px calc(var(--safe) + 16px);
+    }
+
+    /* ── ヘッダー ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0 16px;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .header .subtitle {
+      font-size: 12px;
+      color: #8888aa;
+      margin-top: 2px;
+    }
+
+    /* ── カード共通 ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+
+    .card-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #8888aa;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 8px;
+    }
+
+    /* ── 部屋セレクター ── */
+    .room-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .room-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: #8888aa;
+      font-size: 14px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: all 0.15s;
+    }
+    .room-chip.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+      font-weight: 600;
+    }
+    .room-chip .del-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.2);
+      color: inherit;
+      font-size: 11px;
+      line-height: 1;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+    }
+    .room-add-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .room-input {
+      flex: 1;
+      background: #1e1e2a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 15px;
+      padding: 8px 12px;
+      outline: none;
+    }
+    .room-input:focus { border-color: var(--accent); }
+    .btn-add {
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      font-size: 14px;
+      border: none;
+      border-radius: 10px;
+      padding: 8px 16px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── dBメーター ── */
+    .meter-card {
+      text-align: center;
+    }
+    .db-display {
+      font-size: 80px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -4px;
+      transition: color 0.2s;
+      color: var(--accent);
+    }
+    .db-display.warn  { color: var(--warn); }
+    .db-display.alert { color: var(--danger); }
+    .db-unit { font-size: 24px; font-weight: 400; letter-spacing: 0; }
+
+    .meter-bar-wrap {
+      position: relative;
+      height: 12px;
+      background: #1e1e2a;
+      border-radius: 6px;
+      overflow: hidden;
+      margin: 14px 0 6px;
+    }
+    .meter-bar-fill {
+      height: 100%;
+      border-radius: 6px;
+      width: 0%;
+      transition: width 0.08s linear, background 0.2s;
+      background: var(--accent);
+    }
+    .meter-bar-fill.warn  { background: var(--warn); }
+    .meter-bar-fill.alert { background: var(--danger); }
+    .threshold-marker {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(255,255,255,0.4);
+      border-radius: 1px;
+    }
+
+    .meter-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #8888aa;
+    }
+
+    /* ── スタートボタン ── */
+    .btn-start {
+      display: block;
+      width: 100%;
+      padding: 16px;
+      background: var(--accent);
+      color: #000;
+      font-size: 17px;
+      font-weight: 700;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      margin-bottom: 12px;
+      letter-spacing: -0.3px;
+    }
+    .btn-start.stop {
+      background: #2a2a3a;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+
+    /* ── 閾値スライダー ── */
+    .threshold-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .threshold-val {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--warn);
+      min-width: 56px;
+      text-align: right;
+    }
+    input[type=range] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      background: #2a2a3a;
+      border-radius: 3px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 24px;
+      height: 24px;
+      background: var(--warn);
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(255,170,0,0.4);
+    }
+
+    /* ── 統計 ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .stat-item {
+      background: #1e1e2a;
+      border-radius: 12px;
+      padding: 12px 8px;
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .stat-label {
+      font-size: 10px;
+      color: #8888aa;
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* ── ログ ── */
+    .log-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .log-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #1e1e2a;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+    .log-item .log-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .log-item .log-room {
+      font-weight: 600;
+      color: var(--text);
+    }
+    .log-item .log-time {
+      color: #8888aa;
+      font-size: 11px;
+    }
+    .log-item .log-db {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--danger);
+    }
+    .log-empty {
+      color: #8888aa;
+      font-size: 14px;
+      text-align: center;
+      padding: 16px 0;
+    }
+
+    .btn-clear-log {
+      background: none;
+      border: 1px solid var(--border);
+      color: #8888aa;
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      float: right;
+      margin-top: -2px;
+    }
+
+    /* ── ステータスバー ── */
+    .status-bar {
+      font-size: 12px;
+      color: #8888aa;
+      text-align: center;
+      padding: 4px 0 8px;
+    }
+    .status-bar .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #444;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+    .status-bar.running .dot { background: var(--accent); animation: pulse 1.5s infinite; }
+    .status-bar.alert-on .dot { background: var(--danger); animation: pulse 0.5s infinite; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🔇 騒音モニター</h1>
+    <div class="subtitle">クロスエッジ 民泊・旅館向け</div>
+  </div>
+</div>
+
+<!-- 部屋選択 -->
+<div class="card">
+  <div class="card-label">部屋</div>
+  <div class="room-bar" id="roomBar"></div>
+  <div class="room-add-row">
+    <input class="room-input" id="roomInput" type="text" placeholder="部屋名を入力（例: 竹屋101）" maxlength="20">
+    <button class="btn-add" onclick="addRoom()">追加</button>
+  </div>
+</div>
+
+<!-- スタートボタン -->
+<button class="btn-start" id="startBtn" onclick="toggleMonitor()">マイクをオンにして計測開始</button>
+
+<!-- dBメーター -->
+<div class="card meter-card">
+  <div class="card-label">リアルタイム計測</div>
+  <div class="db-display" id="dbDisplay">--<span class="db-unit"> dB</span></div>
+  <div class="meter-bar-wrap">
+    <div class="meter-bar-fill" id="meterFill"></div>
+    <div class="threshold-marker" id="thresholdMarker"></div>
+  </div>
+  <div class="meter-meta">
+    <span>30 dB</span>
+    <span id="thresholdLabel">閾値: 80 dB</span>
+    <span>110 dB</span>
+  </div>
+</div>
+
+<!-- 閾値スライダー -->
+<div class="card">
+  <div class="card-label">アラート閾値</div>
+  <div class="threshold-row">
+    <span>60</span>
+    <input type="range" id="thresholdSlider" min="60" max="100" value="80" oninput="updateThreshold(this.value)">
+    <span>100</span>
+    <span class="threshold-val" id="thresholdVal">80 dB</span>
+  </div>
+</div>
+
+<!-- 統計 -->
+<div class="card">
+  <div class="card-label">セッション統計</div>
+  <div class="stats-grid">
+    <div class="stat-item">
+      <div class="stat-val" id="statMax">--</div>
+      <div class="stat-label">最大値 dB</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-val" id="statAvg">--</div>
+      <div class="stat-label">平均値 dB</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-val" id="statCount">0</div>
+      <div class="stat-label">超過回数</div>
+    </div>
+  </div>
+</div>
+
+<!-- ログ -->
+<div class="card">
+  <div class="card-label">
+    超過ログ（直近10件）
+    <button class="btn-clear-log" onclick="clearLog()">クリア</button>
+  </div>
+  <ul class="log-list" id="logList">
+    <li class="log-empty">計測を開始するとログが記録されます</li>
+  </ul>
+</div>
+
+<div class="status-bar" id="statusBar">
+  <span class="dot"></span>停止中
+</div>
+
+<script>
+// ── 状態 ──────────────────────────────────────
+const LS_ROOMS   = 'nm_rooms_v1';
+const LS_LOG     = 'nm_log_v1';
+const LS_THRESH  = 'nm_threshold_v1';
+const INTERVAL_MS = 5 * 60 * 1000;  // 5分インターバル
+const LOG_MAX     = 10;
+const DB_MIN      = 30;
+const DB_MAX      = 110;
+
+let audioCtx     = null;
+let analyser     = null;
+let micStream    = null;
+let animFrame    = null;
+let running      = false;
+let lastAlertAt  = 0;
+
+let rooms        = [];
+let activeRoom   = '';
+let threshold    = 80;
+
+// セッション統計
+let sessionMax   = null;
+let sessionSum   = 0;
+let sessionCount = 0;
+let sessionExceed = 0;
+
+// ── 初期化 ────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  const savedRooms = localStorage.getItem(LS_ROOMS);
+  rooms = savedRooms ? JSON.parse(savedRooms) : ['竹屋旅籠', '登竜庵'];
+  if (!rooms.length) rooms = ['竹屋旅籠'];
+  activeRoom = rooms[0];
+
+  const savedThresh = localStorage.getItem(LS_THRESH);
+  if (savedThresh) threshold = parseInt(savedThresh, 10);
+  document.getElementById('thresholdSlider').value = threshold;
+  updateThreshold(threshold, false);
+
+  renderRooms();
+  renderLog();
+  updateThresholdMarker();
+});
+
+// ── 部屋管理 ──────────────────────────────────
+function saveRooms() {
+  localStorage.setItem(LS_ROOMS, JSON.stringify(rooms));
+}
+
+function renderRooms() {
+  const bar = document.getElementById('roomBar');
+  bar.innerHTML = '';
+  rooms.forEach(name => {
+    const chip = document.createElement('div');
+    chip.className = 'room-chip' + (name === activeRoom ? ' active' : '');
+    chip.innerHTML = `<span onclick="selectRoom('${esc(name)}')">${esc(name)}</span>
+      <button class="del-btn" onclick="deleteRoom('${esc(name)}')">×</button>`;
+    bar.appendChild(chip);
+  });
+}
+
+function selectRoom(name) {
+  activeRoom = name;
+  renderRooms();
+}
+
+function addRoom() {
+  const input = document.getElementById('roomInput');
+  const name = input.value.trim();
+  if (!name || rooms.includes(name)) { input.focus(); return; }
+  rooms.push(name);
+  activeRoom = name;
+  saveRooms();
+  renderRooms();
+  input.value = '';
+}
+
+function deleteRoom(name) {
+  if (rooms.length <= 1) return;
+  rooms = rooms.filter(r => r !== name);
+  if (activeRoom === name) activeRoom = rooms[0];
+  saveRooms();
+  renderRooms();
+}
+
+document.getElementById('roomInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addRoom();
+});
+
+// ── 閾値 ──────────────────────────────────────
+function updateThreshold(val, save = true) {
+  threshold = parseInt(val, 10);
+  document.getElementById('thresholdVal').textContent   = threshold + ' dB';
+  document.getElementById('thresholdLabel').textContent = '閾値: ' + threshold + ' dB';
+  if (save) localStorage.setItem(LS_THRESH, threshold);
+  updateThresholdMarker();
+}
+
+function updateThresholdMarker() {
+  const pct = (threshold - DB_MIN) / (DB_MAX - DB_MIN) * 100;
+  document.getElementById('thresholdMarker').style.left = pct + '%';
+}
+
+// ── 計測トグル ────────────────────────────────
+async function toggleMonitor() {
+  if (running) {
+    stopMonitor();
+  } else {
+    await startMonitor();
+  }
+}
+
+async function startMonitor() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    audioCtx  = new Ctx();
+
+    // iOS Safari: resume が必要
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const source = audioCtx.createMediaStreamSource(micStream);
+
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize       = 2048;
+    analyser.smoothingTimeConstant = 0.4;
+    source.connect(analyser);
+
+    running = true;
+    sessionMax = null; sessionSum = 0; sessionCount = 0; sessionExceed = 0;
+    lastAlertAt = 0;
+    updateStats();
+
+    const btn = document.getElementById('startBtn');
+    btn.textContent = '計測を停止する';
+    btn.classList.add('stop');
+
+    setStatus('running', '計測中...');
+    tick();
+  } catch (e) {
+    alert('マイクへのアクセスを許可してください。\n' + e.message);
+  }
+}
+
+function stopMonitor() {
+  running = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  analyser = null; micStream = null; audioCtx = null;
+
+  const btn = document.getElementById('startBtn');
+  btn.textContent = 'マイクをオンにして計測開始';
+  btn.classList.remove('stop');
+
+  document.getElementById('dbDisplay').innerHTML = '--<span class="db-unit"> dB</span>';
+  document.getElementById('dbDisplay').className = 'db-display';
+  document.getElementById('meterFill').style.width = '0%';
+  document.getElementById('meterFill').className = 'meter-bar-fill';
+  setStatus('', '停止中');
+}
+
+// ── 音声処理ループ ────────────────────────────
+function tick() {
+  if (!running) return;
+
+  const bufLen = analyser.fftSize;
+  const buf    = new Float32Array(bufLen);
+  analyser.getFloatTimeDomainData(buf);
+
+  // RMS → dB
+  let sum = 0;
+  for (let i = 0; i < bufLen; i++) sum += buf[i] * buf[i];
+  const rms = Math.sqrt(sum / bufLen);
+  const db  = rms > 1e-9 ? Math.round(20 * Math.log10(rms) + 93) : 0;
+  const clampedDb = Math.max(DB_MIN, Math.min(DB_MAX, db));
+
+  // 表示
+  const dispEl  = document.getElementById('dbDisplay');
+  const fillEl  = document.getElementById('meterFill');
+  const pct     = ((clampedDb - DB_MIN) / (DB_MAX - DB_MIN) * 100).toFixed(1);
+  let colorClass = '';
+  if (db >= threshold)           colorClass = 'alert';
+  else if (db >= threshold - 10) colorClass = 'warn';
+
+  dispEl.innerHTML = db + '<span class="db-unit"> dB</span>';
+  dispEl.className = 'db-display ' + colorClass;
+  fillEl.style.width = pct + '%';
+  fillEl.className = 'meter-bar-fill ' + colorClass;
+
+  // 統計
+  if (db > 0) {
+    sessionCount++;
+    sessionSum += db;
+    if (sessionMax === null || db > sessionMax) sessionMax = db;
+    if (db >= threshold) {
+      sessionExceed++;
+      checkAlert(db);
+      setStatus('alert-on', `アラート中！ ${db} dB`);
+    } else {
+      setStatus('running', '計測中...');
+    }
+    if (sessionCount % 10 === 0) updateStats();
+  }
+
+  animFrame = requestAnimationFrame(tick);
+}
+
+// ── アラートログ（5分インターバル）────────────
+function checkAlert(db) {
+  const now = Date.now();
+  if (now - lastAlertAt < INTERVAL_MS) return;
+  lastAlertAt = now;
+  addLog(activeRoom, db);
+}
+
+function addLog(room, db) {
+  const saved = localStorage.getItem(LS_LOG);
+  const logs  = saved ? JSON.parse(saved) : [];
+  logs.unshift({
+    room,
+    db,
+    time: new Date().toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' })
+  });
+  if (logs.length > LOG_MAX) logs.length = LOG_MAX;
+  localStorage.setItem(LS_LOG, JSON.stringify(logs));
+  renderLog();
+}
+
+function renderLog() {
+  const saved  = localStorage.getItem(LS_LOG);
+  const logs   = saved ? JSON.parse(saved) : [];
+  const ul     = document.getElementById('logList');
+  if (!logs.length) {
+    ul.innerHTML = '<li class="log-empty">計測を開始するとログが記録されます</li>';
+    return;
+  }
+  ul.innerHTML = logs.map(l => `
+    <li class="log-item">
+      <div class="log-left">
+        <span class="log-room">${esc(l.room)}</span>
+        <span class="log-time">${esc(l.time)}</span>
+      </div>
+      <span class="log-db">${l.db} dB</span>
+    </li>`).join('');
+}
+
+function clearLog() {
+  localStorage.removeItem(LS_LOG);
+  renderLog();
+}
+
+// ── 統計更新 ──────────────────────────────────
+function updateStats() {
+  document.getElementById('statMax').textContent   = sessionMax !== null ? sessionMax : '--';
+  document.getElementById('statAvg').textContent   = sessionCount > 0 ? Math.round(sessionSum / sessionCount) : '--';
+  document.getElementById('statCount').textContent = sessionExceed;
+}
+
+// ── ステータス ────────────────────────────────
+function setStatus(cls, text) {
+  const el = document.getElementById('statusBar');
+  el.className = 'status-bar ' + cls;
+  el.innerHTML = '<span class="dot"></span>' + text;
+}
+
+// ── XSSエスケープ ─────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+</body>
+</html>
