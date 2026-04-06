@@ -76,71 +76,65 @@
     }
 
     /* ── 部屋セレクター ── */
-    .room-bar {
+    .room-list {
       display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
+      flex-direction: column;
+      gap: 6px;
     }
-    .room-chip {
-      display: inline-flex;
+    .room-row {
+      display: flex;
       align-items: center;
-      gap: 4px;
-      padding: 6px 12px;
-      border-radius: 20px;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       background: transparent;
-      color: #8888aa;
-      font-size: 14px;
-      cursor: pointer;
-      -webkit-tap-highlight-color: transparent;
-      transition: all 0.15s;
+      transition: border-color 0.15s;
     }
-    .room-chip.active {
-      background: var(--accent);
+    .room-row.active {
       border-color: var(--accent);
-      color: #000;
+      background: rgba(0, 212, 170, 0.08);
+    }
+    .room-name-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #8888aa;
+      font-size: 15px;
+      padding: 2px 0;
+      cursor: pointer;
+    }
+    .room-row.active .room-name-input {
+      color: var(--accent);
       font-weight: 600;
     }
-    .room-chip .del-btn {
+    .room-name-input::placeholder { color: #555566; }
+    .room-row .del-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 16px;
-      height: 16px;
+      width: 22px;
+      height: 22px;
       border-radius: 50%;
-      background: rgba(0,0,0,0.2);
-      color: inherit;
-      font-size: 11px;
+      background: rgba(255,255,255,0.05);
+      color: #8888aa;
+      font-size: 13px;
       line-height: 1;
       cursor: pointer;
       border: none;
-      padding: 0;
+      flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent;
     }
-    .room-add-row {
-      display: flex;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .room-input {
-      flex: 1;
-      background: #1e1e2a;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      color: var(--text);
-      font-size: 15px;
-      padding: 8px 12px;
-      outline: none;
-    }
-    .room-input:focus { border-color: var(--accent); }
-    .btn-add {
-      background: var(--accent);
-      color: #000;
-      font-weight: 700;
+    .btn-add-room {
+      margin-top: 8px;
+      background: none;
+      border: 1px dashed var(--border);
+      color: #8888aa;
       font-size: 14px;
-      border: none;
-      border-radius: 10px;
-      padding: 8px 16px;
+      border-radius: 12px;
+      padding: 8px;
+      width: 100%;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
     }
@@ -362,11 +356,8 @@
 <!-- 部屋選択 -->
 <div class="card">
   <div class="card-label">部屋</div>
-  <div class="room-bar" id="roomBar"></div>
-  <div class="room-add-row">
-    <input class="room-input" id="roomInput" type="text" placeholder="部屋名を入力（例: 竹屋101）" maxlength="20">
-    <button class="btn-add" onclick="addRoom()">追加</button>
-  </div>
+  <div class="room-list" id="roomBar"></div>
+  <button class="btn-add-room" onclick="addRoom()">＋ 部屋を追加</button>
 </div>
 
 <!-- スタートボタン -->
@@ -450,7 +441,7 @@ let running      = false;
 let lastAlertAt  = 0;
 
 let rooms        = [];
-let activeRoom   = '';
+let activeIdx    = 0;
 let threshold    = 80;
 
 // セッション統計
@@ -462,9 +453,9 @@ let sessionExceed = 0;
 // ── 初期化 ────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   const savedRooms = localStorage.getItem(LS_ROOMS);
-  rooms = savedRooms ? JSON.parse(savedRooms) : ['竹屋旅籠', '登竜庵'];
-  if (!rooms.length) rooms = ['竹屋旅籠'];
-  activeRoom = rooms[0];
+  rooms = savedRooms ? JSON.parse(savedRooms) : ['登竜庵', '竹屋旅籠 2F', '竹屋旅籠 3F'];
+  if (!rooms.length) rooms = ['登竜庵', '竹屋旅籠 2F', '竹屋旅籠 3F'];
+  activeIdx = 0;
 
   const savedThresh = localStorage.getItem(LS_THRESH);
   if (savedThresh) threshold = parseInt(savedThresh, 10);
@@ -481,45 +472,65 @@ function saveRooms() {
   localStorage.setItem(LS_ROOMS, JSON.stringify(rooms));
 }
 
+function activeRoomName() {
+  return (rooms[activeIdx] || '').trim() || '名称未設定';
+}
+
 function renderRooms() {
-  const bar = document.getElementById('roomBar');
-  bar.innerHTML = '';
-  rooms.forEach(name => {
-    const chip = document.createElement('div');
-    chip.className = 'room-chip' + (name === activeRoom ? ' active' : '');
-    chip.innerHTML = `<span onclick="selectRoom('${esc(name)}')">${esc(name)}</span>
-      <button class="del-btn" onclick="deleteRoom('${esc(name)}')">×</button>`;
-    bar.appendChild(chip);
+  const list = document.getElementById('roomBar');
+  list.innerHTML = '';
+  rooms.forEach((name, i) => {
+    const row = document.createElement('div');
+    row.className = 'room-row' + (i === activeIdx ? ' active' : '');
+
+    const inp = document.createElement('input');
+    inp.type        = 'text';
+    inp.className   = 'room-name-input';
+    inp.value       = name;
+    inp.placeholder = '名称未設定';
+    inp.maxLength   = 30;
+    inp.addEventListener('focus',  () => selectRoom(i));
+    inp.addEventListener('input',  () => updateRoomName(i, inp.value));
+    inp.addEventListener('blur',   saveRooms);
+
+    const del = document.createElement('button');
+    del.className   = 'del-btn';
+    del.textContent = '×';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteRoom(i); });
+
+    row.appendChild(inp);
+    row.appendChild(del);
+    list.appendChild(row);
   });
 }
 
-function selectRoom(name) {
-  activeRoom = name;
+function selectRoom(idx) {
+  activeIdx = idx;
   renderRooms();
+}
+
+function updateRoomName(idx, val) {
+  rooms[idx] = val;
+  // アクティブ行のラベルだけ更新（再描画なし）
 }
 
 function addRoom() {
-  const input = document.getElementById('roomInput');
-  const name = input.value.trim() || '名称未設定';
-  if (rooms.includes(name)) { input.focus(); return; }
-  rooms.push(name);
-  activeRoom = name;
+  rooms.push('');
+  activeIdx = rooms.length - 1;
   saveRooms();
   renderRooms();
-  input.value = '';
+  // 追加した行の input にフォーカス
+  const inputs = document.getElementById('roomBar').querySelectorAll('.room-name-input');
+  if (inputs[activeIdx]) inputs[activeIdx].focus();
 }
 
-function deleteRoom(name) {
+function deleteRoom(idx) {
   if (rooms.length <= 1) return;
-  rooms = rooms.filter(r => r !== name);
-  if (activeRoom === name) activeRoom = rooms[0];
+  rooms.splice(idx, 1);
+  if (activeIdx >= rooms.length) activeIdx = rooms.length - 1;
   saveRooms();
   renderRooms();
 }
-
-document.getElementById('roomInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') addRoom();
-});
 
 // ── 閾値 ──────────────────────────────────────
 function updateThreshold(val, save = true) {
@@ -630,7 +641,7 @@ function tick() {
     if (db >= threshold) {
       sessionExceed++;
       checkAlert(db);
-      setStatus('alert-on', `アラート中！ ${db} dB`);
+      setStatus('alert-on', `アラート中！ ${db} dB [${activeRoomName()}]`);
     } else {
       setStatus('running', '計測中...');
     }
@@ -645,8 +656,8 @@ function checkAlert(db) {
   const now = Date.now();
   if (now - lastAlertAt < INTERVAL_MS) return;
   lastAlertAt = now;
-  addLog(activeRoom, db);
-  sendNtfy(activeRoom, db);
+  addLog(activeRoomName(), db);
+  sendNtfy(activeRoomName(), db);
 }
 
 function addLog(room, db) {
