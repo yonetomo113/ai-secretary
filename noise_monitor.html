@@ -691,27 +691,17 @@ function testNtfy() {
   const db   = 99;
   const res  = document.getElementById('ntfyTestResult');
   res.textContent = '送信中...';
-  sendNtfy(room, db, (ok) => {
-    res.textContent = ok ? `✓ 送信完了 [${room} / ${db}dB]` : '✗ 送信失敗';
-  });
+  sendNtfy(room, db)
+    .then(() => { res.textContent = `✓ 送信完了 [${room} / ${db}dB]`; })
+    .catch(() => { res.textContent = '✗ 送信失敗'; });
 }
 
 // ── ntfy.sh 通知 ──────────────────────────────
-function sendNtfy(room, db, callback) {
-  const timeStr = new Date().toLocaleString('ja-JP', {
-    month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'
+function sendNtfy(room, db) {
+  return fetch('https://ntfy.sh/crossedge-noise-alert', {
+    method: 'POST',
+    body: '騒音アラート: ' + room + ' ' + db + 'dB'
   });
-  const body = `${room} で${db}dBを検知 ${timeStr}`;
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', 'https://ntfy.sh/crossedge-noise-alert');
-  xhr.setRequestHeader('Title', '騒音アラート');
-  xhr.setRequestHeader('Priority', 'high');
-  xhr.setRequestHeader('Tags', 'loudspeaker');
-  if (callback) {
-    xhr.onload = () => callback(xhr.status >= 200 && xhr.status < 300);
-    xhr.onerror = () => callback(false);
-  }
-  xhr.send(body);
 }
 
 function renderLog() {
