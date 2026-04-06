@@ -500,8 +500,8 @@ function selectRoom(name) {
 
 function addRoom() {
   const input = document.getElementById('roomInput');
-  const name = input.value.trim();
-  if (!name || rooms.includes(name)) { input.focus(); return; }
+  const name = input.value.trim() || '名称未設定';
+  if (rooms.includes(name)) { input.focus(); return; }
   rooms.push(name);
   activeRoom = name;
   saveRooms();
@@ -646,6 +646,7 @@ function checkAlert(db) {
   if (now - lastAlertAt < INTERVAL_MS) return;
   lastAlertAt = now;
   addLog(activeRoom, db);
+  sendNtfy(activeRoom, db);
 }
 
 function addLog(room, db) {
@@ -659,6 +660,24 @@ function addLog(room, db) {
   if (logs.length > LOG_MAX) logs.length = LOG_MAX;
   localStorage.setItem(LS_LOG, JSON.stringify(logs));
   renderLog();
+}
+
+// ── ntfy.sh 通知 ──────────────────────────────
+function sendNtfy(room, db) {
+  const timeStr = new Date().toLocaleString('ja-JP', {
+    month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'
+  });
+  const body = `${room} で${db}dBを検知 ${timeStr}`;
+  fetch('https://ntfy.sh/crossedge-noise-alert', {
+    method: 'POST',
+    headers: {
+      'Title': '騒音アラート',
+      'Priority': 'high',
+      'Tags': 'loudspeaker',
+      'Content-Type': 'text/plain; charset=utf-8',
+    },
+    body,
+  }).catch(() => {}); // 失敗しても計測に影響しない
 }
 
 function renderLog() {
