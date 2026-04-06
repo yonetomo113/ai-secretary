@@ -506,7 +506,10 @@ function renderRooms() {
 
 function selectRoom(idx) {
   activeIdx = idx;
-  renderRooms();
+  // DOM再描画せず、CSSクラスだけ更新する
+  document.querySelectorAll('#roomBar .room-row').forEach((row, i) => {
+    row.classList.toggle('active', i === idx);
+  });
 }
 
 function updateRoomName(idx, val) {
