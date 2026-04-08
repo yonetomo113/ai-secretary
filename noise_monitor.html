@@ -342,6 +342,59 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
+
+    /* ── 通知設定 ── */
+    .notify-card-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .sub-label {
+      font-size: 12px;
+      color: #8888aa;
+      margin-bottom: 6px;
+    }
+    .time-range-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .time-input {
+      flex: 1;
+      background: #1e1e2a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 16px;
+      padding: 8px 10px;
+      outline: none;
+      text-align: center;
+      -webkit-appearance: none;
+    }
+    .time-input:focus { border-color: var(--accent); }
+    .time-sep { color: #8888aa; font-size: 14px; flex-shrink: 0; }
+
+    /* ── 通知状態バッジ ── */
+    .notify-status-row {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 10px;
+      min-height: 22px;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      color: #8888aa;
+      background: #1e1e2a;
+    }
+    .badge.warn   { color: var(--warn);   border-color: var(--warn);   background: rgba(255,170,0,0.08); }
+    .badge.danger { color: var(--danger); border-color: var(--danger); background: rgba(255,68,102,0.08); }
+    .badge.muted  { color: #666688;       border-color: #333344; }
   </style>
 </head>
 <body>
@@ -376,6 +429,7 @@
     <span id="thresholdLabel">閾値: 80 dB</span>
     <span>110 dB</span>
   </div>
+  <div class="notify-status-row" id="notifyStatusRow"></div>
 </div>
 
 <!-- 閾値スライダー -->
@@ -386,6 +440,29 @@
     <input type="range" id="thresholdSlider" min="60" max="100" value="80" oninput="updateThreshold(this.value)">
     <span>100</span>
     <span class="threshold-val" id="thresholdVal">80 dB</span>
+  </div>
+</div>
+
+<!-- 通知設定 -->
+<div class="card">
+  <div class="card-label">通知設定</div>
+  <div class="notify-card-grid">
+    <div>
+      <div class="sub-label">通知する時間帯（時間外は計測のみ・通知なし）</div>
+      <div class="time-range-row">
+        <input type="time" class="time-input" id="notifyStartInput" value="22:00" onchange="updateNotifyTime()">
+        <span class="time-sep">〜</span>
+        <input type="time" class="time-input" id="notifyEndInput" value="08:00" onchange="updateNotifyTime()">
+      </div>
+    </div>
+    <div>
+      <div class="sub-label">連続超過回数: <span id="consecVal">3</span> 回連続で通知</div>
+      <div class="threshold-row">
+        <span>1</span>
+        <input type="range" id="consecSlider" min="1" max="10" value="3" oninput="updateConsec(this.value)">
+        <span>10</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -434,13 +511,16 @@
 
 <script>
 // ── 状態 ──────────────────────────────────────
-const LS_ROOMS   = 'nm_rooms_v1';
-const LS_LOG     = 'nm_log_v1';
-const LS_THRESH  = 'nm_threshold_v1';
-const INTERVAL_MS = 5 * 60 * 1000;  // 5分インターバル
-const LOG_MAX     = 10;
-const DB_MIN      = 30;
-const DB_MAX      = 110;
+const LS_ROOMS         = 'nm_rooms_v1';
+const LS_LOG           = 'nm_log_v1';
+const LS_THRESH        = 'nm_threshold_v1';
+const LS_NOTIFY_START  = 'nm_notify_start_v1';
+const LS_NOTIFY_END    = 'nm_notify_end_v1';
+const LS_CONSEC        = 'nm_consec_v1';
+const INTERVAL_MS      = 5 * 60 * 1000;
+const LOG_MAX          = 10;
+const DB_MIN           = 30;
+const DB_MAX           = 110;
 
 let audioCtx     = null;
 let analyser     = null;
@@ -452,6 +532,10 @@ let lastAlertAt  = 0;
 let rooms        = [];
 let activeIdx    = 0;
 let threshold    = 80;
+let notifyStart  = '22:00';
+let notifyEnd    = '08:00';
+let consecRequired = 3;
+let consecCount    = 0;
 
 // セッション統計
 let sessionMax   = null;
@@ -470,6 +554,18 @@ window.addEventListener('DOMContentLoaded', () => {
   if (savedThresh) threshold = parseInt(savedThresh, 10);
   document.getElementById('thresholdSlider').value = threshold;
   updateThreshold(threshold, false);
+
+  const savedStart = localStorage.getItem(LS_NOTIFY_START);
+  const savedEnd   = localStorage.getItem(LS_NOTIFY_END);
+  if (savedStart) notifyStart = savedStart;
+  if (savedEnd)   notifyEnd   = savedEnd;
+  document.getElementById('notifyStartInput').value = notifyStart;
+  document.getElementById('notifyEndInput').value   = notifyEnd;
+
+  const savedConsec = localStorage.getItem(LS_CONSEC);
+  if (savedConsec) consecRequired = parseInt(savedConsec, 10);
+  document.getElementById('consecSlider').value = consecRequired;
+  document.getElementById('consecVal').textContent = consecRequired;
 
   renderRooms();
   renderLog();
@@ -544,6 +640,49 @@ function deleteRoom(idx) {
   renderRooms();
 }
 
+// ── 通知時間帯 ────────────────────────────────
+function updateNotifyTime() {
+  notifyStart = document.getElementById('notifyStartInput').value || '22:00';
+  notifyEnd   = document.getElementById('notifyEndInput').value   || '08:00';
+  localStorage.setItem(LS_NOTIFY_START, notifyStart);
+  localStorage.setItem(LS_NOTIFY_END,   notifyEnd);
+}
+
+function isNotifyHour() {
+  const now  = new Date();
+  const cur  = now.getHours() * 60 + now.getMinutes();
+  const [sh, sm] = notifyStart.split(':').map(Number);
+  const [eh, em] = notifyEnd.split(':').map(Number);
+  const s = sh * 60 + sm;
+  const e = eh * 60 + em;
+  return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
+}
+
+// ── 連続超過カウント ───────────────────────────
+function updateConsec(val) {
+  consecRequired = parseInt(val, 10);
+  document.getElementById('consecVal').textContent = consecRequired;
+  localStorage.setItem(LS_CONSEC, consecRequired);
+}
+
+// ── 通知状態バッジ更新 ────────────────────────
+function updateNotifyStatus() {
+  const row = document.getElementById('notifyStatusRow');
+  if (!running) { row.innerHTML = ''; return; }
+
+  const inHour  = isNotifyHour();
+  const badges  = [];
+
+  if (!inHour) {
+    badges.push('<span class="badge muted">時間外（通知オフ）</span>');
+  }
+  if (consecCount > 0) {
+    const cls = consecCount >= consecRequired ? 'danger' : 'warn';
+    badges.push(`<span class="badge ${cls}">連続 ${consecCount}/${consecRequired}回</span>`);
+  }
+  row.innerHTML = badges.join('');
+}
+
 // ── 閾値 ──────────────────────────────────────
 function updateThreshold(val, save = true) {
   threshold = parseInt(val, 10);
@@ -585,6 +724,7 @@ async function startMonitor() {
 
     running = true;
     sessionMax = null; sessionSum = 0; sessionCount = 0; sessionExceed = 0;
+    consecCount = 0;
     lastAlertAt = 0;
     updateStats();
 
@@ -651,12 +791,15 @@ function tick() {
     sessionSum += db;
     if (sessionMax === null || db > sessionMax) sessionMax = db;
     if (db >= threshold) {
+      consecCount++;
       sessionExceed++;
       checkAlert(db);
       setStatus('alert-on', `アラート中！ ${db} dB [${activeRoomName()}]`);
     } else {
+      consecCount = 0;
       setStatus('running', '計測中...');
     }
+    updateNotifyStatus();
     if (sessionCount % 10 === 0) updateStats();
   }
 
@@ -665,6 +808,8 @@ function tick() {
 
 // ── アラートログ（5分インターバル）────────────
 function checkAlert(db) {
+  if (consecCount < consecRequired) return;
+  if (!isNotifyHour()) return;
   const now = Date.now();
   if (now - lastAlertAt < INTERVAL_MS) return;
   lastAlertAt = now;
