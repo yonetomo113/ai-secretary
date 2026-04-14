@@ -2,3 +2,4 @@ kabu.db
 reports/
 __pycache__/
 *.pyc
+client_secret*.json

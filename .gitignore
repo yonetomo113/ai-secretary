@@ -1,3 +1,12 @@
+# 機密ファイル（絶対にコミット禁止）
+.env
+*.env
+credentials.json
+client_secret*.json
+token.pickle
+token_xedge.pickle
+logs/
+
 # macOS
 .DS_Store
 
