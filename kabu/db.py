@@ -1,6 +1,8 @@
+import os
 import sqlite3
 import pandas as pd
-from config import DB_PATH
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'kabu.db')
 
 
 def get_conn():

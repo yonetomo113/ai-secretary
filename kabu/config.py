@@ -30,8 +30,8 @@ THRESHOLD = {
     "8306.T": 1.5,  # 三菱UFJ（安定大型）
 }
 
-DB_PATH = "/Users/yonetomo/ai-secretary/kabu/kabu.db"
-REPORT_DIR = "/Users/yonetomo/ai-secretary/kabu/reports"
+import os
+REPORT_DIR = os.path.join(os.path.dirname(__file__), 'reports')
 FETCH_PERIOD = "3mo"
 
 # テクニカル指標パラメータ
