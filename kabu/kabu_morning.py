@@ -3,21 +3,15 @@
   - データ取得 → ルール/パターン分析 → レポート生成 → Gmail送信
   - GitHub Actions（毎朝JST 8:50）および手動実行の両対応
 
-Gmail認証に必要な環境変数:
-  GMAIL_CLIENT_ID
-  GMAIL_CLIENT_SECRET
-  GMAIL_REFRESH_TOKEN
+メール送信に必要な環境変数:
+  XEDGE_GMAIL_APP_PASSWORD  - xedgeltd@gmail.com のアプリパスワード
 """
 
 import os
 import sys
-import base64
-import json
 import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime
-
-import requests
 
 # kabu/ ディレクトリをパスに追加（ローカル・CI両対応）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,55 +23,34 @@ from rules import evaluate_rules, summarize_flags
 from patterns import detect_patterns
 from report import build_report, save_report, FLAG_LABELS
 
-RECIPIENT = "g.kamifor@gmail.com"
-
-OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token"
-GMAIL_SEND_URL = "https://www.googleapis.com/gmail/v1/users/me/messages/send"
+SMTP_HOST  = "smtp.gmail.com"
+SMTP_PORT  = 587
+SMTP_USER  = "xedgeltd@gmail.com"
+SEND_FROM  = "xedgeltd@gmail.com"
+RECIPIENT  = "g.kamifor@gmail.com"
 
 
 # -----------------------------------------------------------------------
-# Gmail送信
+# Gmail送信（SMTP）
 # -----------------------------------------------------------------------
-
-def _get_access_token() -> str:
-    """リフレッシュトークンからアクセストークンを取得"""
-    client_id = os.environ["GMAIL_CLIENT_ID"]
-    client_secret = os.environ["GMAIL_CLIENT_SECRET"]
-    refresh_token = os.environ["GMAIL_REFRESH_TOKEN"]
-
-    resp = requests.post(OAUTH_TOKEN_URL, data={
-        "grant_type": "refresh_token",
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-    }, timeout=15)
-    resp.raise_for_status()
-    return resp.json()["access_token"]
-
-
-def _build_mime(subject: str, body: str) -> str:
-    """MIMEメッセージをbase64urlエンコードして返す"""
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["To"] = RECIPIENT
-    msg["From"] = "me"
-    msg["Subject"] = subject
-    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    return raw
-
 
 def send_report_email(report_text: str, date_str: str) -> None:
-    """レポートをGmailで送信する"""
+    """レポートをSMTP経由でGmail送信する"""
+    app_password = os.environ["XEDGE_GMAIL_APP_PASSWORD"]
     subject = f"【カブさん】本日の相場報告 {date_str}"
-    access_token = _get_access_token()
 
-    raw = _build_mime(subject, report_text)
-    resp = requests.post(
-        GMAIL_SEND_URL,
-        headers={"Authorization": f"Bearer {access_token}"},
-        json={"raw": raw},
-        timeout=20,
-    )
-    resp.raise_for_status()
+    msg = MIMEText(report_text, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"]    = SEND_FROM
+    msg["To"]      = RECIPIENT
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as smtp:
+        smtp.ehlo()
+        smtp.starttls()
+        smtp.ehlo()
+        smtp.login(SMTP_USER, app_password)
+        smtp.sendmail(SEND_FROM, RECIPIENT, msg.as_string())
+
     print(f"メール送信完了 → {RECIPIENT}")
 
 
@@ -138,8 +111,7 @@ def main():
     print(report_text)
 
     # Step5: Gmail送信
-    gmail_vars = ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")
-    if all(os.environ.get(v) for v in gmail_vars):
+    if os.environ.get("XEDGE_GMAIL_APP_PASSWORD"):
         print("\n【Step5】Gmail送信中...")
         try:
             send_report_email(report_text, today)
@@ -147,7 +119,7 @@ def main():
             print(f"メール送信失敗: {e}")
             sys.exit(1)
     else:
-        print("\n【Step5】Gmail環境変数が未設定のためメール送信をスキップ")
+        print("\n【Step5】XEDGE_GMAIL_APP_PASSWORD未設定のためメール送信をスキップ")
 
 
 if __name__ == "__main__":
