@@ -19,17 +19,20 @@ token_xedge.pickle  : ~/.config/ai-secretary/token_xedge.pickle  (xedgeltd)
   python3 morning_briefing.py --auth-xedge # xedgeltd を再認証
 """
 
+import base64
+import json
 import os
 import pickle
 import re
-import smtplib
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
 import anthropic
+import requests
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -46,18 +49,17 @@ JST         = timezone(timedelta(hours=9))
 
 load_dotenv(BASE_DIR / ".env")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
-GMAIL_APP_PASSWORD = os.environ.get("XEDGE_GMAIL_APP_PASSWORD", "")
-# SMTPはxedgeltd経由で送信（g.kamifor宛）
-SMTP_USER   = "xedgeltd@gmail.com"
-SEND_FROM   = "xedgeltd@gmail.com"
+SEND_FROM   = "g.kamifor@gmail.com"
 SEND_TO     = "g.kamifor@gmail.com"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
-SCOPES_CAL_ONLY = [
+SCOPES_XEDGE = [
+    "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
@@ -67,6 +69,30 @@ GMAIL_QUERIES = {
     "チェックイン":   "subject:(チェックイン OR check-in OR 予約確認 OR reservation) newer_than:3d",
     "チェックアウト": "subject:(チェックアウト OR check-out) newer_than:3d",
     "清掃":           "subject:(清掃 OR クリーニング OR cleaning) newer_than:3d",
+}
+
+# Airbnb検索クエリ（xedgeltd@gmail.com のメールボックス）
+AIRBNB_QUERIES = {
+    "チェックイン": (
+        "from:airbnb.com "
+        "(subject:チェックイン OR subject:check-in OR subject:本日のゲスト OR subject:arriving) "
+        "newer_than:2d"
+    ),
+    "チェックアウト": (
+        "from:airbnb.com "
+        "(subject:チェックアウト OR subject:check-out OR subject:checkout) "
+        "newer_than:2d"
+    ),
+    "新規予約": (
+        "from:airbnb.com "
+        "(subject:予約確認 OR subject:reservation confirmed OR subject:booking confirmed OR subject:新しいご予約) "
+        "newer_than:2d"
+    ),
+    "清掃": (
+        "from:airbnb.com "
+        "(subject:清掃 OR subject:クリーニング OR subject:cleaning) "
+        "newer_than:2d"
+    ),
 }
 
 
@@ -150,7 +176,7 @@ def get_google_creds(reauth=False):
 
 
 def get_google_creds_xedge(reauth=False):
-    """xedgeltd@gmail.com 用 OAuth（Calendar のみ）"""
+    """xedgeltd@gmail.com 用 OAuth（Gmail + Calendar）"""
     if reauth and TOKEN_FILE_XEDGE.exists():
         TOKEN_FILE_XEDGE.unlink()
         log("token_xedge.pickle を削除しました（再認証）")
@@ -183,7 +209,7 @@ def get_google_creds_xedge(reauth=False):
     print("ブラウザが開いたら  xedgeltd@gmail.com  でログインしてください。")
     print("=" * 60 + "\n")
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS), SCOPES_CAL_ONLY)
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS), SCOPES_XEDGE)
     creds = flow.run_local_server(
         port=0,
         login_hint="xedgeltd@gmail.com",
@@ -235,21 +261,60 @@ def gmail_section(service):
     return "\n".join(lines)
 
 
+def airbnb_section(xedge_gmail_service):
+    """xedgeltd@gmail.com のAirbnb予約メールを取得して表示"""
+    lines = ["\n### Airbnb予約メール（xedgeltd）"]
+    found_any = False
+    for label, query in AIRBNB_QUERIES.items():
+        items = fetch_gmail(xedge_gmail_service, query, max_results=5)
+        if not items:
+            continue
+        found_any = True
+        lines.append(f"\n  ▼ {label}（{len(items)}件）")
+        for it in items:
+            date_short = it["date"][:16] if it["date"] else ""
+            lines.append(f"    - [{date_short}] {it['subject']}")
+            if it["snippet"]:
+                snippet = re.sub(r"\s+", " ", it["snippet"])[:100]
+                lines.append(f"        {snippet}")
+    if not found_any:
+        lines.append("  なし")
+    return "\n".join(lines)
+
+
 # ── Google Calendar ───────────────────────────────────────────────
 def fetch_events(service):
-    """1日分のイベントリストを取得"""
+    """当日分のイベントリストを取得（UTC1日ずれ対応）"""
     jst_today = datetime.now(JST)
-    day_start = jst_today.replace(hour=0,  minute=0,  second=0,  microsecond=0)
-    day_end   = jst_today.replace(hour=23, minute=59, second=59, microsecond=0)
+    today_str = jst_today.strftime("%Y-%m-%d")
+
+    # timeMinを前日JST0時に設定（終日イベントのUTCずれをカバー）
+    day_start = (jst_today - timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    day_end = jst_today.replace(hour=23, minute=59, second=59, microsecond=0)
+
     result = service.events().list(
         calendarId="primary",
         timeMin=day_start.isoformat(),
         timeMax=day_end.isoformat(),
         singleEvents=True,
         orderBy="startTime",
-        maxResults=20,
+        maxResults=50,
     ).execute()
-    return result.get("items", [])
+
+    filtered = []
+    for e in result.get("items", []):
+        start_date = e["start"].get("date")      # 終日イベント: "YYYY-MM-DD"
+        start_dt   = e["start"].get("dateTime")  # 時刻付き: ISO8601
+        if start_date:
+            if start_date == today_str:
+                filtered.append(e)
+        elif start_dt:
+            dt_jst = datetime.fromisoformat(start_dt).astimezone(JST)
+            if dt_jst.strftime("%Y-%m-%d") == today_str:
+                filtered.append(e)
+    return filtered
 
 
 def calendar_section(gkami_service, xedge_service=None):
@@ -316,23 +381,154 @@ def summarize(raw_text: str) -> str:
     return msg.content[0].text.strip()
 
 
-# ── メール送信（SMTP / xedgeltd→g.kamifor）────────────────────────
-def send_mail(subject: str, body: str):
-    if not GMAIL_APP_PASSWORD:
-        log("警告: XEDGE_GMAIL_APP_PASSWORD 未設定のためメール送信スキップ")
-        return
+# ── メール送信（Gmail API / g.kamifor OAuth）──────────────────────
+def send_mail(subject: str, body: str, gmail_service):
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = SEND_FROM
     msg["To"]      = SEND_TO
     msg.attach(MIMEText(body, "plain", "utf-8"))
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
-            s.login(SMTP_USER, GMAIL_APP_PASSWORD)
-            s.send_message(msg)
+        gmail_service.users().messages().send(
+            userId="me", body={"raw": raw}
+        ).execute()
         log(f"メール送信完了 → {SEND_TO}")
     except Exception as e:
         log(f"メール送信失敗: {e}")
+
+
+# ── AI ニュース収集・分析（requests + キーワードマッチ）──────────────
+_REQ_TIMEOUT = 8
+_REQ_HEADERS  = {"User-Agent": "Mozilla/5.0 (compatible; morning-briefing/1.0)"}
+_MAX_NEWS_ITEMS = 5
+
+# HackerNews の AI 判定パターン
+_AI_PATTERN = re.compile(
+    r"\b(ai|llm|gpt|claude|openai|anthropic|gemini|chatgpt|langchain"
+    r"|machine.?learning|neural|language.?model|chatbot|automation|agent)\b",
+    re.IGNORECASE,
+)
+
+# 業務関連フィルタ（不動産・旅館・清掃・自動化・デイトレード）
+_BUSINESS_PATTERN = re.compile(
+    r"\b(automat|workflow|agent|api|sdk|tool|release|claude|openai|gpt"
+    r"|anthropic|llm|model|real.?estate|property|hotel|hospitality"
+    r"|booking|airbnb|rental|lodg|clean|housekeep"
+    r"|trading|stock|financ|quant|market|invest)\b",
+    re.IGNORECASE,
+)
+
+
+def _req_get(url: str) -> requests.Response:
+    return requests.get(url, timeout=_REQ_TIMEOUT, headers=_REQ_HEADERS)
+
+
+def _is_ai_related(text: str) -> bool:
+    return bool(_AI_PATTERN.search(text))
+
+
+def _is_business_relevant(text: str) -> bool:
+    return bool(_BUSINESS_PATTERN.search(text))
+
+
+def _fetch_anthropic_news() -> list:
+    """anthropic.com/news から最新記事タイトルを取得する（<h4> タグ）。"""
+    try:
+        resp = _req_get("https://www.anthropic.com/news")
+        html = resp.text
+        # <h4> タグに記事タイトルが入っている
+        raw = re.findall(r"<h4[^>]*>\s*([^<]{10,150})\s*</h4>", html)
+        # ナビゲーション項目を除外（短すぎるものや定型句）
+        titles = [t.strip() for t in raw if len(t.strip()) > 15]
+        return [{"title": t, "source": "Anthropic News"} for t in titles[:8]]
+    except Exception as e:
+        log(f"anthropic.com/news 取得失敗: {e}")
+        return []
+
+
+def _fetch_anthropic_changelog() -> list:
+    """docs.anthropic.com/en/release-notes/api から最新エントリを取得する。"""
+    try:
+        resp = _req_get("https://docs.anthropic.com/en/release-notes/api")
+        html = resp.text
+        # <div>日付</div> の後の <ul><li> を取得
+        entries = re.findall(
+            r"<div>(\w+ \d+, \d{4})</div>.*?<ul[^>]*>(.*?)</ul>",
+            html, re.DOTALL,
+        )
+        results = []
+        for date, body in entries[:6]:
+            items = re.findall(r"<li[^>]*>(.*?)</li>", body, re.DOTALL)
+            for item in items[:2]:
+                clean = re.sub(r"<[^>]+>", " ", item)
+                clean = re.sub(r"&#x27;", "'", clean)
+                clean = re.sub(r"&amp;", "&", clean)
+                clean = re.sub(r"\s+", " ", clean).strip()[:150]
+                if clean:
+                    results.append({"title": f"[{date}] {clean}", "source": "Anthropic Changelog"})
+        return results
+    except Exception as e:
+        log(f"docs.anthropic.com/en/release-notes/api 取得失敗: {e}")
+        return []
+
+
+def _fetch_hn_ai_items() -> list:
+    """HackerNews top stories から AI 関連記事を並列取得する。"""
+    try:
+        resp = _req_get("https://hacker-news.firebaseio.com/v0/topstories.json")
+        story_ids = resp.json()[:60]
+    except Exception as e:
+        log(f"HackerNews ID 取得失敗: {e}")
+        return []
+
+    def fetch_item(story_id):
+        try:
+            r = _req_get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")
+            item = r.json()
+            if item and item.get("type") == "story" and item.get("title"):
+                return {"title": item["title"], "source": "HackerNews"}
+        except Exception:
+            pass
+        return None
+
+    results = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [pool.submit(fetch_item, sid) for sid in story_ids]
+        for future in as_completed(futures):
+            item = future.result()
+            if item and _is_ai_related(item["title"]):
+                results.append(item)
+    return results
+
+
+def fetch_and_analyze_ai_news() -> str:
+    """3ソースからAIニュースを収集し業務関連のみ返す。"""
+    all_items = []
+    all_items.extend(_fetch_anthropic_news())
+    all_items.extend(_fetch_anthropic_changelog())
+    all_items.extend(_fetch_hn_ai_items())
+
+    relevant = [
+        item for item in all_items
+        if _is_business_relevant(item.get("title", ""))
+    ]
+
+    if not relevant:
+        return "本日の関連AIニュース：なし"
+
+    lines = [f"• [{item['source']}] {item['title'].strip()}" for item in relevant[:_MAX_NEWS_ITEMS]]
+    return "\n".join(lines)
+
+
+def ai_news_section() -> str:
+    """AI ニュースセクション文字列を返す。"""
+    try:
+        result = fetch_and_analyze_ai_news()
+    except Exception as e:
+        log(f"AI ニュース取得失敗: {e}")
+        result = f"（取得エラー: {e}）"
+    return f"\n## 📰 AI新着情報\n{result}\n"
 
 
 # ── メイン ────────────────────────────────────────────────────────
@@ -351,28 +547,40 @@ def main():
     cal_gkami   = build("calendar", "v3", credentials=creds_gkami)
     log("g.kamifor 認証完了")
 
-    # xedgeltd@gmail.com 認証（Calendar のみ）
+    # xedgeltd@gmail.com 認証（Gmail + Calendar）
     log("Google認証中（xedgeltd@gmail.com）...")
+    gmail_xedge = None
+    cal_xedge   = None
     try:
         creds_xedge = get_google_creds_xedge(reauth=auth_xedge)
+        gmail_xedge = build("gmail",    "v1", credentials=creds_xedge)
         cal_xedge   = build("calendar", "v3", credentials=creds_xedge)
         log("xedgeltd 認証完了")
     except Exception as e:
         log(f"xedgeltd 認証失敗（スキップ）: {e}")
-        cal_xedge = None
 
     # データ収集
-    log("Gmail取得中...")
+    log("Gmail取得中（g.kamifor）...")
     g_text = gmail_section(gmail_sv)
 
     log("カレンダー取得中（両アカウント）...")
     c_text = calendar_section(cal_gkami, cal_xedge)
 
-    raw = f"{g_text}\n\n{c_text}"
+    log("Airbnb予約メール取得中（xedgeltd）...")
+    if gmail_xedge:
+        a_text = airbnb_section(gmail_xedge)
+    else:
+        a_text = "\n### Airbnb予約メール（xedgeltd）\n  （xedgeltd 認証失敗のためスキップ）"
+
+    raw = f"{g_text}\n\n{c_text}\n\n{a_text}"
 
     # Claude要約
     log("Claude要約中...")
     summary = summarize(raw)
+
+    # AI ニュース収集・分析
+    log("AI ニュース収集・分析中...")
+    ai_news = ai_news_section()
 
     # 出力組み立て
     sep    = "=" * 60
@@ -384,13 +592,15 @@ def main():
         f"\n{sep}\n"
         f"{raw}\n"
         f"{sep}\n"
+        f"{ai_news}"
+        f"{sep}\n"
         f"ログ: {log_path}\n"
     )
 
     print(output)
 
     # メール送信
-    send_mail(f"朝のブリーフィング {now_str}", output)
+    send_mail(f"朝のブリーフィング {now_str}", output, gmail_sv)
 
     log("=== 完了 ===\n")
 
