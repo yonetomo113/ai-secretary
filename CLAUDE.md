@@ -17,6 +17,17 @@
 - 箇条書きは短く、アクション可能な形で
 - ファイル出力は必ず適切なサブフォルダに保存する
 
+## シフト表の自動読み込み
+
+朝ブリーフィング（「おはよう」「今日の予定」「ブリーフィング」）の実行時、
+`config/shift-urls.md` に記載されている最新のシフトURLを自動で読み込み、
+ブリーフィングレポートに反映すること。
+
+- URLは毎月変わる。最新URLは `config/shift-urls.md` を参照する
+- シフト表から「らいおん君が清掃担当の土日」を抽出し、1週間前アラートを `areas/reminders/` に登録する
+- 翌月URLは原則26日までに更新されるが、それ以前に更新されることもある
+- URLが古い・無効な場合はユーザーに新しいURLを確認する
+
 ## タスクルーティング
 
 ユーザーの依頼を以下の表で判定し、該当プロトコルに従って実行する。
@@ -63,3 +74,45 @@
 - `archive/` — 完了・非アクティブ（PARA: Archive）
 
 詳細は `protocols/project-mgmt.md` を参照。
+
+## 毎朝のアクション確認ルール（汎用pending管理）
+
+おはようと言われたら必ず以下を実行すること：
+
+### 1. shift_pending.json確認
+/Users/yonetomo/Context/shift_pending.json を読み込み
+「要手動対応」ステータスのシフトがあれば報告：
+「【要対応】4/7 登竜庵 スタッフ未割り当てです。手動でassiftに登録してください。」
+
+### 2. taimee_pending.json確認
+/Users/yonetomo/Context/taimee_pending.json を読み込み
+未確認のものがあれば報告：
+「【タイミー確認】4/7 らいおん君(登竜庵)が追加されています。タイミー募集しましたか？」
+ユーザーが「した」「不要」と返答→該当エントリのstatusを「完了」に更新
+
+### 3. 直近シフト差分チェック
+/Users/yonetomo/Context/daily_memo/ 配下の最新2日分を比較
+7日以内に新規追加されたシフトを検出→taimee_pending.jsonに追記
+
+### 4. content_pending.json確認
+/Users/yonetomo/Context/content_pending.json を読み込み
+「未確認」ステータスの記事があれば報告：
+「【ブログ下書き】"（タイトル）" をWPに保存しました。確認してください → https://yonetomo113.com/wp-admin」
+ユーザーが「確認した」「公開した」「削除」等と返答→該当エントリのstatusを「完了」に更新
+※火・土曜日のみ生成されるため、他の曜日は確認不要
+
+### 5. pending総括
+未対応項目がなければ「本日のpending：なし」と表示
+
+---
+## 関連スクリプト
+- airbnb_sync.py：Airbnb予約メール→Googleカレンダー登録/削除
+- shift_assign.py：カレンダー予約→スタッフ割り当て→assift登録
+- auto_sync.py：Gmail→Context/アイデア/同期
+- content_draft.py：ブログ記事自動生成→WordPress下書き保存（火・土のみ）
+
+---
+## 鉄則：修正したら必ずpush
+morning_briefing.py・property_scout.py等を修正した場合、
+テスト確認後に必ずgit add → git commit → git pushまで実行すること。
+pushなしで作業完了と報告することを禁止する。
