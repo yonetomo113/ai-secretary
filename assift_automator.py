@@ -49,9 +49,8 @@ SCOPES_XEDGE = [
 ]
 
 # Airbnb予約メール検索クエリ（xedgeltd@gmail.com）
-# Gmail は (subject:A OR subject:B) の括弧つき複合クエリを非サポート。
-# subject: は使わず from + 本文キーワードで広く拾い、本文パースで絞る。
-AIRBNB_QUERY = "from:airbnb.com ご予約 newer_than:14d"
+# 当月・翌月の予約をカバーするため30日分を取得。本文パースで対象物件に絞る。
+AIRBNB_QUERY = "from:airbnb.com ご予約 newer_than:30d"
 
 # 物件名キーワード → shift-urls.md のテーブル見出しにマッチさせる
 PROPERTY_KEYWORDS: dict[str, list[str]] = {
@@ -106,17 +105,54 @@ def _get_gmail_service_xedge():
 # ─────────────────────────────────────────────
 # shift-urls.md パーサー
 # ─────────────────────────────────────────────
-def load_shift_urls() -> dict[str, str]:
-    """shift-urls.md のテーブルから {物件名: URL} を返す"""
+def load_shift_urls() -> dict[str, dict[str, str]]:
+    """
+    shift-urls.md のテーブルを {YYYY-MM: {物件名: URL}} 形式で返す。
+
+    対応フォーマット:
+      ## 2026年4月       →  {"2026-04": {"竹屋旅籠": "...", "登竜庵": "..."}}
+      ## 現在のURL（2026年4月）  も同様にパース
+
+    月ヘッダーがない行のテーブルは "latest" キーに格納する（後方互換）。
+    """
     if not SHIFT_URLS_MD.exists():
         log(f"WARNING: {SHIFT_URLS_MD} が見つかりません")
         return {}
-    urls: dict[str, str] = {}
+
+    result: dict[str, dict[str, str]] = {}
+    current_key = "latest"
+
     for line in SHIFT_URLS_MD.read_text(encoding="utf-8").splitlines():
+        # ## 見出しから年月を抽出
+        h = re.match(r"^##\s+.*?(\d{4})年(\d{1,2})月", line)
+        if h:
+            current_key = f"{h.group(1)}-{int(h.group(2)):02d}"
+            continue
+
+        # テーブル行
         m = re.match(r"\|\s*(.+?)\s*\|\s*(https://assift\.com/\S+?)\s*\|", line)
         if m:
-            urls[m.group(1)] = m.group(2)
-    return urls
+            result.setdefault(current_key, {})[m.group(1)] = m.group(2)
+
+    return result
+
+
+def get_assift_url(shift_urls: dict[str, dict[str, str]], property_name: str, target_date: date) -> str | None:
+    """
+    対象日の年月に対応する assift URL を返す。
+    該当月のエントリがなければ 'latest' キーにフォールバック。
+    """
+    ym = target_date.strftime("%Y-%m")
+    url = shift_urls.get(ym, {}).get(property_name)
+    if not url:
+        url = shift_urls.get("latest", {}).get(property_name)
+    if not url:
+        # 月に関わらず最初に見つかったエントリを使う（旧フォーマット対応）
+        for month_urls in shift_urls.values():
+            if property_name in month_urls:
+                url = month_urls[property_name]
+                break
+    return url
 
 
 def detect_property(text: str) -> str | None:
@@ -516,7 +552,7 @@ def run(dry_run: bool = False, debug: bool = False):
     if not shift_urls:
         log("ERROR: shift-urls.md から URL を取得できませんでした")
         sys.exit(1)
-    log(f"シフトURL読込: {shift_urls}")
+    log(f"シフトURL読込: {list(shift_urls.keys())} 月分")
 
     pending = load_pending()
     processed_ids: list[str] = pending.get("processed", [])
@@ -529,10 +565,10 @@ def run(dry_run: bool = False, debug: bool = False):
     for res in reservations:
         prop_name = res["property"]
         checkout  = res["checkout"]   # 清掃日 = チェックアウト日
-        url = shift_urls.get(prop_name)
+        url = get_assift_url(shift_urls, prop_name, checkout)
 
         if not url:
-            log(f"WARNING: {prop_name} の assift URL が未設定 → shift-urls.md を確認してください")
+            log(f"WARNING: {prop_name} ({checkout.strftime('%Y-%m')}) の assift URL が未設定 → shift-urls.md に {checkout.year}年{checkout.month}月セクションを追記してください")
             pending["assignments"].append({
                 "date": str(checkout),
                 "property": prop_name,

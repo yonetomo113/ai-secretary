@@ -531,6 +531,24 @@ def ai_news_section() -> str:
     return f"\n## 📰 AI新着情報\n{result}\n"
 
 
+def shift_reminder_section() -> str:
+    """毎月24日のみ assift シフト自動割当リマインドを返す。それ以外は空文字。"""
+    now = datetime.now(JST)
+    if now.day != 24:
+        return ""
+    next_month = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+    nm_str = f"{next_month.year}年{next_month.month}月"
+    return (
+        "\n## 💡 【重要】シフト自動割当リマインド\n"
+        f"本日17:00に{nm_str}分のシフト自動割当（assift_automator.py）を実行します。\n"
+        f"assiftで{nm_str}分のURLを発行し、`config/shift-urls.md` の **{nm_str}** セクションに追記してください。\n"
+        "追記フォーマット:\n"
+        f"```\n## {nm_str}\n\n| 物件 | URL |\n|------|-----|\n"
+        "| 竹屋旅籠 | https://assift.com/share/XXXXXXXX |\n"
+        "| 登竜庵   | https://assift.com/share/YYYYYYYY |\n```\n"
+    )
+
+
 # ── メイン ────────────────────────────────────────────────────────
 def main():
     reauth      = "--reauth"     in sys.argv
@@ -582,13 +600,17 @@ def main():
     log("AI ニュース収集・分析中...")
     ai_news = ai_news_section()
 
+    # 24日リマインド
+    shift_reminder = shift_reminder_section()
+
     # 出力組み立て
     sep    = "=" * 60
     output = (
         f"{sep}\n"
         f"朝のブリーフィング  {now_str}\n"
         f"{sep}\n"
-        f"\n## 【今日のアクション】\n{summary}\n"
+        + (shift_reminder if shift_reminder else "")
+        + f"\n## 【今日のアクション】\n{summary}\n"
         f"\n{sep}\n"
         f"{raw}\n"
         f"{sep}\n"
