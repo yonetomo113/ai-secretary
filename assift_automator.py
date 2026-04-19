@@ -49,12 +49,9 @@ SCOPES_XEDGE = [
 ]
 
 # Airbnb予約メール検索クエリ（xedgeltd@gmail.com）
-AIRBNB_QUERY = (
-    "from:airbnb.com "
-    "(subject:予約確認 OR subject:reservation confirmed OR subject:booking confirmed "
-    "OR subject:新しいご予約 OR subject:New reservation) "
-    "newer_than:7d"
-)
+# Gmail は (subject:A OR subject:B) の括弧つき複合クエリを非サポート。
+# subject: は使わず from + 本文キーワードで広く拾い、本文パースで絞る。
+AIRBNB_QUERY = "from:airbnb.com ご予約 newer_than:14d"
 
 # 物件名キーワード → shift-urls.md のテーブル見出しにマッチさせる
 PROPERTY_KEYWORDS: dict[str, list[str]] = {
@@ -163,19 +160,42 @@ def parse_airbnb_reservation(body: str, subject: str) -> dict | None:
     guest_m = re.search(r"(?:ゲスト名?|Guest)[:\s：]*([^\n\r,、]{2,30})", body)
     guest = guest_m.group(1).strip() if guest_m else ""
 
-    # 日付パターン（複数形式に対応）
+    # 件名と本文を結合して日付抽出（件名に日付が入るケースに対応）
+    search_text = subject + "\n" + body
     found_dates: list[date] = []
+    current_year = datetime.now(JST).year
 
     # 2026年4月15日
-    for m in re.finditer(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日", body):
+    for m in re.finditer(r"(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日", search_text):
         try:
             found_dates.append(date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
         except ValueError:
             pass
 
+    # 4月18日～20日（年なし・同月範囲）例: "4月18日～20日のご予約"
+    if len(found_dates) < 2:
+        for m in re.finditer(r"(\d{1,2})月(\d{1,2})日[〜～\-](\d{1,2})日", search_text):
+            try:
+                mo, d1, d2 = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                found_dates.append(date(current_year, mo, d1))
+                found_dates.append(date(current_year, mo, d2))
+            except ValueError:
+                pass
+
+    # 4月18日～5月2日（年なし・月跨ぎ）
+    if len(found_dates) < 2:
+        for m in re.finditer(r"(\d{1,2})月(\d{1,2})日[〜～\-](\d{1,2})月(\d{1,2})日", search_text):
+            try:
+                mo1, d1 = int(m.group(1)), int(m.group(2))
+                mo2, d2 = int(m.group(3)), int(m.group(4))
+                found_dates.append(date(current_year, mo1, d1))
+                found_dates.append(date(current_year, mo2, d2))
+            except ValueError:
+                pass
+
     # 2026-04-15 / 2026/04/15
     if len(found_dates) < 2:
-        for m in re.finditer(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", body):
+        for m in re.finditer(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", search_text):
             try:
                 found_dates.append(date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
             except ValueError:
@@ -187,7 +207,7 @@ def parse_airbnb_reservation(body: str, subject: str) -> dict | None:
             "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
             "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
         }
-        for m in re.finditer(r"([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})", body):
+        for m in re.finditer(r"([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})", search_text):
             mo_str = m.group(1)[:3].lower()
             if mo_str in month_map:
                 try:
@@ -196,7 +216,7 @@ def parse_airbnb_reservation(body: str, subject: str) -> dict | None:
                     pass
 
     if len(found_dates) < 2:
-        log(f"日付抽出失敗: found={found_dates} subject={subject}")
+        log(f"日付抽出失敗: found={found_dates} subject={subject[:60]}")
         return None
 
     found_dates.sort()
@@ -250,6 +270,8 @@ def fetch_unprocessed_reservations(service, processed_ids: list[str]) -> list[di
                     f"{reservation['checkin']}〜{reservation['checkout']} "
                     f"{reservation['guest']}"
                 )
+            else:
+                log(f"スキップ（物件/日付不一致）: {subject[:60]}")
         except Exception as e:
             log(f"メール取得エラー (id={msg_id}): {e}")
 
