@@ -322,8 +322,8 @@ def submit_assift_shift(
             page.wait_for_timeout(2000)
             _screenshot(page, "01_loaded")
 
-            _navigate_to_month(page, shift_date)
-            _screenshot(page, "02_month_navigated")
+            _verify_month(page, shift_date)
+            _screenshot(page, "02_month_verified")
 
             clicked = _click_day(page, shift_date)
             if not clicked:
@@ -363,84 +363,114 @@ def submit_assift_shift(
             return False
 
 
-def _navigate_to_month(page, target_date: date):
-    """現在表示中のカレンダーを target_date の月に合わせる"""
-    target_ym = (target_date.year, target_date.month)
-
-    for _ in range(12):
-        # ページ上の「年月」テキストを検出
-        header = page.locator(
-            ".calendar-header, .month-title, .fc-toolbar-title, h2"
-        ).first
-        if header.count() > 0:
-            txt = header.inner_text()
-            m = re.search(r"(\d{4})[年/](\d{1,2})", txt)
-            if m:
-                y, mo = int(m.group(1)), int(m.group(2))
-                if (y, mo) == target_ym:
-                    return
-                if (y, mo) < target_ym:
-                    next_btn = page.locator(
-                        "button[aria-label*='次'], "
-                        "button[aria-label*='next'], "
-                        ".fc-next-button, "
-                        "button:has-text('>')"
-                    ).first
-                    if next_btn.count() > 0:
-                        next_btn.click()
-                        page.wait_for_timeout(500)
-                        continue
-        break
+def _verify_month(page, target_date: date) -> bool:
+    """
+    assift の share URL は月固定表示（月ナビなし）。
+    ヘッダーの「M/1 〜 M/末」テキストで対象月が一致するか確認する。
+    不一致の場合は警告を出すだけで続行（shift-urls.md の更新を促す）。
+    """
+    try:
+        header = page.locator(".calendar-header").first
+        if header.count() == 0:
+            return True  # ヘッダー不明の場合は続行
+        txt = header.inner_text(timeout=3000)
+        # "4/1 〜 4/30" のような形式
+        m = re.search(r"(\d{1,2})/1", txt)
+        if m:
+            page_month = int(m.group(1))
+            if page_month != target_date.month:
+                log(
+                    f"WARNING: assift URL の表示月({page_month}月) と "
+                    f"対象日({target_date.month}月)が不一致。"
+                    "config/shift-urls.md のURLを翌月分に更新してください。"
+                )
+                return False
+    except Exception:
+        pass
+    return True
 
 
 def _click_day(page, target_date: date) -> bool:
-    """カレンダー上の target_date をクリックする。成功したら True を返す。"""
-    day = str(target_date.day)
-    date_str_hyphen = target_date.strftime("%Y-%m-%d")
-    date_str_slash  = target_date.strftime("%Y/%m/%d")
+    """
+    assift カレンダーの構造:
+      table.share-calendar > thead > tr.date-area > th > p.day  （日付ヘッダー）
+      table.share-calendar > tbody > tr.staff > td.pattern-name （クリック対象）
 
-    # assift の実際のDOMに合わせてセレクタを追記・調整すること
-    # （--debug モードでブラウザを開いて開発者ツールで確認するのが確実）
-    selectors = [
-        f"[data-date='{date_str_hyphen}']",
-        f"[data-date='{date_str_slash}']",
-        f"td.fc-day[data-date='{date_str_hyphen}']",
-        f".fc-daygrid-day[data-date='{date_str_hyphen}']",
-        f"[class*='calendar-day']:has-text('{day}')",
-        f".day-cell:has-text('{day}')",
-        f"td:has-text('{day}'):not([class*='other-month'])",
-        f"[class*='day']:has-text('{day}')",
-    ]
+    p.day のテキストで列インデックスを特定し、tbody の同列 td をクリックする。
+    """
+    day_str = str(target_date.day)
 
-    for sel in selectors:
+    # ── 1. thead の th から対象日の列インデックスを特定 ──
+    ths = page.locator("table.share-calendar thead tr.date-area th")
+    col_idx = -1
+    th_count = ths.count()
+    for i in range(th_count):
+        th = ths.nth(i)
+        day_p = th.locator("p.day")
+        if day_p.count() == 0:
+            continue
         try:
-            loc = page.locator(sel).first
-            if loc.count() > 0:
-                loc.click(timeout=3000)
-                return True
+            if day_p.inner_text(timeout=1000).strip() == day_str:
+                col_idx = i + 1  # :nth-child は 1-indexed
+                break
         except Exception:
             continue
 
+    if col_idx < 0:
+        log(f"列インデックス特定失敗: day={day_str} (thead th数={th_count})")
+        return False
+
+    log(f"列インデックス: {col_idx} (day={day_str})")
+
+    # ── 2. tbody の staff 行で同列の td.pattern-name をクリック ──
+    td = page.locator(
+        f"table.share-calendar tbody tr.staff td.pattern-name:nth-child({col_idx})"
+    ).first
+    if td.count() > 0:
+        td.scroll_into_view_if_needed()
+        td.click(timeout=5000)
+        page.wait_for_timeout(800)
+        return True
+
+    # フォールバック: staff 行の全 td から nth-child で選択
+    td_fallback = page.locator(
+        f"table.share-calendar tbody tr.staff td:nth-child({col_idx})"
+    ).first
+    if td_fallback.count() > 0:
+        td_fallback.scroll_into_view_if_needed()
+        td_fallback.click(timeout=5000)
+        page.wait_for_timeout(800)
+        return True
+
+    log(f"td クリック失敗: nth-child({col_idx})")
     return False
 
 
 def _submit_form(page) -> bool:
-    """確定ボタンを探してクリックする"""
+    """
+    日付セルクリック後に表示されるモーダル・ドロップダウンの確定ボタンを押す。
+    assift はセル選択後にパターン選択モーダルが出る場合がある。
+    """
+    page.wait_for_timeout(1000)
+
     submit_selectors = [
+        # assift 独自ボタン（実際のDOMに合わせて更新可）
+        ".modal button:has-text('保存')",
+        ".modal button:has-text('登録')",
+        ".modal button:has-text('確定')",
+        ".modal button[type='submit']",
+        # 汎用
+        "button:has-text('保存')",
+        "button:has-text('登録')",
+        "button:has-text('確定')",
+        "button:has-text('送信')",
         "button[type='submit']",
         "input[type='submit']",
-        "button:has-text('送信')",
-        "button:has-text('確定')",
-        "button:has-text('登録')",
-        "button:has-text('保存')",
-        "button:has-text('Submit')",
-        "[class*='submit']",
-        "[class*='confirm']",
     ]
     for sel in submit_selectors:
         try:
             btn = page.locator(sel).first
-            if btn.count() > 0:
+            if btn.count() > 0 and btn.is_visible():
                 btn.click(timeout=3000)
                 page.wait_for_timeout(1500)
                 return True
