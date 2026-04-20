@@ -24,6 +24,10 @@ assift_automator.py — Airbnb予約メール → assift シフト自動登録
   - 英語件名（"Reservation confirmed" 等）も処理対象。AIRBNB_QUERY に英語キーワードを含む
   - 物件名キーワード（PROPERTY_KEYWORDS）が本文・件名どちらにも見つからない場合は
     shift_pending.json に status="要手動対応" で記録してスキップする
+  - config/shift-urls.md に該当物件・月のURLが未登録の場合（get_assift_url が None を返す）、
+    shift_pending.json に status="要手動対応", reason="assift URL 未設定" で記録し、
+    assift への自動登録はスキップする。その場合は shift-urls.md に対象月セクションを追記して
+    手動で assift に登録すること
   - 新しい物件を追加するには PROPERTY_KEYWORDS dict にエントリを追加し、
     config/shift-urls.md にも URL を追記すること
 """
