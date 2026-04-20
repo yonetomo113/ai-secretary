@@ -364,6 +364,8 @@ def summarize(raw_text: str) -> str:
 民泊・旅館（竹屋旅籠・登竜庵）の運営に関係する情報を優先し、
 今日やるべきことを箇条書きで簡潔にまとめてください。
 
+重要度の基準（高→低）: 法的期限・許認可 > 対外アポイント > ゲスト対応 > 業者・清掃対応 > その他
+
 【データ】
 {raw_text}
 
@@ -372,10 +374,12 @@ def summarize(raw_text: str) -> str:
 - 絵文字なし、断定調
 - 1行100字以内
 - アクション不要な情報は省略
+- データが空またはアクション不要な情報のみの場合は「本日のアクションなし」と1行だけ出力
 """
     msg = client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=512,
+        system="あなたは有限会社クロスエッジの秘書AIです。出力は「・」始まりの箇条書きのみ。前置き・後書き・ヘッダーは一切書かない。",
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()
