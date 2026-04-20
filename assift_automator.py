@@ -12,8 +12,20 @@ assift_automator.py — Airbnb予約メール → assift シフト自動登録
 
 使い方:
   python3 assift_automator.py           # 通常実行
-  python3 assift_automator.py --dry-run # フォーム送信せずに確認のみ
+  python3 assift_automator.py --dry-run # フォーム送信せずに確認のみ（JSON記録もしない）
   python3 assift_automator.py --debug   # ブラウザを表示して操作確認
+
+前提条件:
+  - ~/.config/ai-secretary/credentials.json（Google Cloud OAuthクライアント）
+  - 初回実行時にブラウザが開き xedgeltd@gmail.com でのOAuth認証が必要
+  - config/shift-urls.md に物件ごとの assift URL が登録済みであること
+
+注意事項:
+  - 英語件名（"Reservation confirmed" 等）も処理対象。AIRBNB_QUERY に英語キーワードを含む
+  - 物件名キーワード（PROPERTY_KEYWORDS）が本文・件名どちらにも見つからない場合は
+    shift_pending.json に status="要手動対応" で記録してスキップする
+  - 新しい物件を追加するには PROPERTY_KEYWORDS dict にエントリを追加し、
+    config/shift-urls.md にも URL を追記すること
 """
 
 import argparse
@@ -49,8 +61,9 @@ SCOPES_XEDGE = [
 ]
 
 # Airbnb予約メール検索クエリ（xedgeltd@gmail.com）
-# 当月・翌月の予約をカバーするため30日分を取得。本文パースで対象物件に絞る。
-AIRBNB_QUERY = "from:airbnb.com ご予約 newer_than:30d"
+# 日本語件名（ご予約）と英語件名（confirmed/reservation）の両方をカバー。
+# 本文パースで対象物件に絞る。「ご予約」のみにすると英語通知がスキップされるため注意。
+AIRBNB_QUERY = "from:airbnb.com (ご予約 OR confirmed OR reservation) newer_than:30d"
 
 # 物件名キーワード → shift-urls.md のテーブル見出しにマッチさせる
 PROPERTY_KEYWORDS: dict[str, list[str]] = {
