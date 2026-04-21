@@ -42,7 +42,7 @@ WP_BASE_URL     = os.environ["WP_BASE_URL"].rstrip("/")
 GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]
 
 DEFAULT_TOPIC = "広島の民泊・旅館運営で役立つ清掃チェックリスト"
-GEMINI_MODEL  = "gemini-2.0-flash"
+GEMINI_MODEL  = "gemini-1.5-flash"
 GEMINI_URL    = (
     f"https://generativelanguage.googleapis.com/v1beta/models"
     f"/{GEMINI_MODEL}:generateContent"
