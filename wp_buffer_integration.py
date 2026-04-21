@@ -126,8 +126,10 @@ def post_to_wordpress(title: str, content: str) -> str:
         "status":  "draft",
     }
 
+    # LiteSpeed環境では /wp-json/ ルーティングが機能しないため ?rest_route= 経由で投稿
+    site_url = WP_BASE_URL.replace("/wp-json/wp/v2", "")
     resp = requests.post(
-        f"{WP_BASE_URL}/posts",
+        f"{site_url}/?rest_route=/wp/v2/posts",
         headers=headers,
         json=payload,
         timeout=30,
