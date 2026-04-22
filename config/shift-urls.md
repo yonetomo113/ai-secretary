@@ -18,6 +18,13 @@
 | 登竜庵   | https://assift.com/share/YYYYYYYY |
 ```
 
+## 2026年5月
+
+| 物件 | URL |
+|------|-----|
+| 竹屋旅籠 | https://assift.com/share/nSV9zsw4 |
+| 登竜庵   | https://assift.com/share/z3BtVn3c |
+
 ## 2026年4月
 
 | 物件 | URL |
