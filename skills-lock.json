@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "empirical-prompt-tuning": {
+      "source": "mizchi/chezmoi-dotfiles",
+      "sourceType": "github",
+      "computedHash": "70e5a20153bc46d173d91ef0f5786972427afb85c971329731711c814b9c9911"
+    },
+    "postiz": {
+      "source": "gitroomhq/postiz-agent",
+      "sourceType": "github",
+      "computedHash": "d0d0cb17d5e9d67835084402b2619bdad538ccf716081cb28ba868c578bd65fe"
+    },
+    "social-content": {
+      "source": "coreyhaines31/marketingskills",
+      "sourceType": "github",
+      "computedHash": "252f58c9993ea38761a6b6cc6f0bbe83fb13f94387a925a57049ca3ca3793b6b"
+    },
+    "social-publisher": {
+      "source": "claude-office-skills/skills",
+      "sourceType": "github",
+      "computedHash": "3f4a60ea1a380adaa8f47c13f4e7fbc008171868ef730da357a8d90c16595bb1"
+    },
+    "wp-rest-api": {
+      "source": "wordpress/agent-skills",
+      "sourceType": "github",
+      "computedHash": "07d98b54fb41b6dccb0bae9f1a5b0d786776e9438ff5eba17d9dec7db89e5104"
+    }
+  }
+}

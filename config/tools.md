@@ -5,15 +5,15 @@
 
 ## メール
 
-- **状態**: 無効
-- **ツール**: （例: Gmail / Outlook）
-- **操作方法**: （例: Gmail MCP, CLI, 手動コピペ）
+- **状態**: 有効
+- **ツール**: Gmail
+- **操作方法**: Gmail MCP
 
 ## カレンダー
 
-- **状態**: 無効
-- **ツール**: （例: Google Calendar / Outlook Calendar）
-- **操作方法**: （例: Google Calendar MCP, CLI）
+- **状態**: 有効
+- **ツール**: Google Calendar
+- **操作方法**: Google Calendar MCP
 - **タイムゾーン**: Asia/Tokyo
 
 ## チャット

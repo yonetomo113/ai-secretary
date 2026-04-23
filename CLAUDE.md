@@ -111,6 +111,10 @@
 - auto_sync.py：Gmail→Context/アイデア/同期
 - content_draft.py：ブログ記事自動生成→WordPress下書き保存（火・土のみ）
 
+## ホームディレクトリの残存スクリプト（~/）
+- learn_blog_style.py：yonetomo113.com文体学習→blog_style.md生成（孤立・保持）
+  LaunchAgent・GitHub Actionsいずれからも未参照。content_draft.pyとの連携用として保持。
+
 ---
 ## 鉄則：修正したら必ずpush
 morning_briefing.py・property_scout.py等を修正した場合、
