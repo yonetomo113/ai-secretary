@@ -40,9 +40,9 @@ from googleapiclient.discovery import build
 
 try:
     from assift_automator import sync_airbnb_to_pending, load_pending
-    _ASSIFT_AVAILABLE = True
 except ImportError:
-    _ASSIFT_AVAILABLE = False
+    sync_airbnb_to_pending = None
+    load_pending = None
 
 # ── 設定 ──────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent
@@ -561,7 +561,7 @@ def shift_reminder_section() -> str:
 
 def _pending_shifts_section() -> str:
     """shift_pending.json の未登録・要手動対応シフトをブリーフィングに表示する。"""
-    if not _ASSIFT_AVAILABLE:
+    if load_pending is None:
         return ""
     try:
         pending = load_pending()
@@ -625,7 +625,7 @@ def main():
         a_text = "\n### Airbnb予約メール（xedgeltd）\n  （xedgeltd 認証失敗のためスキップ）"
 
     # Airbnb予約を shift_pending.json にキュー（Playwright なし）
-    if gmail_xedge and _ASSIFT_AVAILABLE:
+    if gmail_xedge and sync_airbnb_to_pending is not None:
         try:
             new_count, _ = sync_airbnb_to_pending(gmail_xedge)
             if new_count:
