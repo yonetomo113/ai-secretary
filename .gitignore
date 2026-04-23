@@ -30,3 +30,16 @@ memory/patterns.md
 areas/
 projects/PRJ-*/
 archive/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# ローカルログ（LaunchAgent経由で生成）
+kabu/kabu_stdout.log
+kabu/kabu_stderr.log
+
+# Claude Code ローカル設定
+.claude/
+skills-lock.json
