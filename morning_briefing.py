@@ -38,6 +38,12 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
+try:
+    from assift_automator import sync_airbnb_to_pending, load_pending
+    _ASSIFT_AVAILABLE = True
+except ImportError:
+    _ASSIFT_AVAILABLE = False
+
 # ── 設定 ──────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent
 CONFIG_DIR  = Path.home() / ".config" / "ai-secretary"
@@ -553,6 +559,30 @@ def shift_reminder_section() -> str:
     )
 
 
+def _pending_shifts_section() -> str:
+    """shift_pending.json の未登録・要手動対応シフトをブリーフィングに表示する。"""
+    if not _ASSIFT_AVAILABLE:
+        return ""
+    try:
+        pending = load_pending()
+    except Exception:
+        return ""
+
+    items = pending.get("assignments", [])
+    actionable = [a for a in items if a.get("status") in ("未登録", "要手動対応")]
+    if not actionable:
+        return "\n### シフト待ち（assift）\n  なし"
+
+    lines = [f"\n### シフト待ち（assift）: {len(actionable)} 件"]
+    for a in actionable:
+        status = a.get("status", "")
+        reason = f" ※{a['reason']}" if a.get("reason") else ""
+        lines.append(
+            f"  - [{status}] {a.get('date')} {a.get('property')} {a.get('guest','')}{reason}"
+        )
+    return "\n".join(lines)
+
+
 # ── メイン ────────────────────────────────────────────────────────
 def main():
     reauth      = "--reauth"     in sys.argv
@@ -594,7 +624,17 @@ def main():
     else:
         a_text = "\n### Airbnb予約メール（xedgeltd）\n  （xedgeltd 認証失敗のためスキップ）"
 
-    raw = f"{g_text}\n\n{c_text}\n\n{a_text}"
+    # Airbnb予約を shift_pending.json にキュー（Playwright なし）
+    if gmail_xedge and _ASSIFT_AVAILABLE:
+        try:
+            new_count, _ = sync_airbnb_to_pending(gmail_xedge)
+            if new_count:
+                log(f"新規Airbnb予約 {new_count} 件をシフトキューに追加")
+        except Exception as e:
+            log(f"shift_pending 同期失敗（スキップ）: {e}")
+
+    shift_pending_text = _pending_shifts_section()
+    raw = f"{g_text}\n\n{c_text}\n\n{a_text}\n\n{shift_pending_text}"
 
     # Claude要約
     log("Claude要約中...")

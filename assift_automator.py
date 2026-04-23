@@ -31,6 +31,7 @@ assift_automator.py — Airbnb予約メール → assift シフト自動登録
   - 新しい物件を追加するには PROPERTY_KEYWORDS dict にエントリを追加し、
     config/shift-urls.md にも URL を追記すること
 """
+from __future__ import annotations
 
 import argparse
 import base64
@@ -347,6 +348,51 @@ def save_pending(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 
+def sync_airbnb_to_pending(service=None) -> tuple[int, list]:
+    """
+    Airbnb予約メールをパースして shift_pending.json に status="未登録" で追記する。
+    Playwright は使わない。morning_briefing.py からも呼び出し可能。
+
+    service: xedgeltd@gmail.com の Gmail API サービス。None の場合は内部取得。
+    Returns: (新規追加数, 追加されたアイテムリスト)
+    """
+    if service is None:
+        service = _get_gmail_service_xedge()
+        if service is None:
+            return 0, []
+
+    pending = load_pending()
+    processed_ids: list[str] = pending.get("processed", [])
+    existing_ids = {a["gmail_id"] for a in pending.get("assignments", []) if "gmail_id" in a}
+
+    reservations = fetch_unprocessed_reservations(service, processed_ids)
+
+    new_items = []
+    for res in reservations:
+        gid = res.get("gmail_id", "")
+        if gid in existing_ids:
+            continue
+        item: dict = {
+            "date":         str(res["checkout"]),
+            "property":     res["property"],
+            "guest":        res.get("guest", ""),
+            "confirmation": res.get("confirmation", ""),
+            "checkin":      str(res["checkin"]),
+            "gmail_id":     gid,
+            "status":       "未登録",
+            "queued_at":    datetime.now(JST).isoformat(),
+        }
+        pending["assignments"].append(item)
+        new_items.append(item)
+        existing_ids.add(gid)
+
+    if new_items:
+        save_pending(pending)
+        log(f"shift_pending.json に {len(new_items)} 件追記（未登録）")
+
+    return len(new_items), new_items
+
+
 # ─────────────────────────────────────────────
 # Playwright: assift フォーム操作
 # ─────────────────────────────────────────────
@@ -569,54 +615,57 @@ def run(dry_run: bool = False, debug: bool = False):
         sys.exit(1)
     log(f"シフトURL読込: {list(shift_urls.keys())} 月分")
 
+    # Gmailから新規予約を取得して shift_pending.json に "未登録" で追記
+    new_count, _ = sync_airbnb_to_pending(service)
+    if new_count:
+        log(f"新規予約 {new_count} 件をキューに追加")
+
     pending = load_pending()
     processed_ids: list[str] = pending.get("processed", [])
 
-    reservations = fetch_unprocessed_reservations(service, processed_ids)
-    if not reservations:
-        log("未処理の予約メールなし")
+    # "未登録" アイテムのみ処理対象
+    unregistered = [
+        a for a in pending.get("assignments", [])
+        if a.get("status") == "未登録"
+    ]
+    if not unregistered:
+        log("未処理の予約なし")
         return
 
-    for res in reservations:
-        prop_name = res["property"]
-        checkout  = res["checkout"]   # 清掃日 = チェックアウト日
+    for item in unregistered:
+        prop_name = item["property"]
+        checkout  = date.fromisoformat(item["date"])   # 清掃日 = チェックアウト日
         url = get_assift_url(shift_urls, prop_name, checkout)
 
         if not url:
-            log(f"WARNING: {prop_name} ({checkout.strftime('%Y-%m')}) の assift URL が未設定 → shift-urls.md に {checkout.year}年{checkout.month}月セクションを追記してください")
-            pending["assignments"].append({
-                "date": str(checkout),
-                "property": prop_name,
-                "guest": res.get("guest", ""),
-                "confirmation": res.get("confirmation", ""),
-                "status": "要手動対応",
-                "reason": "assift URL 未設定",
-            })
+            log(
+                f"WARNING: {prop_name} ({checkout.strftime('%Y-%m')}) の assift URL が未設定"
+                f" → shift-urls.md に {checkout.year}年{checkout.month}月セクションを追記してください"
+            )
+            item["status"] = "要手動対応"
+            item["reason"] = "assift URL 未設定"
             save_pending(pending)
             continue
 
+        res_dict = {
+            "property":     prop_name,
+            "guest":        item.get("guest", ""),
+            "confirmation": item.get("confirmation", ""),
+        }
         success = submit_assift_shift(
             assift_url=url,
             shift_date=checkout,
-            reservation=res,
+            reservation=res_dict,
             dry_run=dry_run,
             debug=debug,
         )
 
-        pending["assignments"].append({
-            "date": str(checkout),
-            "property": prop_name,
-            "guest": res.get("guest", ""),
-            "confirmation": res.get("confirmation", ""),
-            "checkin": str(res["checkin"]),
-            "gmail_id": res.get("gmail_id", ""),
-            "status": "完了" if success else "要手動対応",
-            "registered_at": datetime.now(JST).isoformat(),
-            "dry_run": dry_run,
-        })
-
-        if success and not dry_run:
-            processed_ids.append(res.get("gmail_id", ""))
+        if not dry_run:
+            item["status"] = "完了" if success else "要手動対応"
+            item["registered_at"] = datetime.now(JST).isoformat()
+            if success:
+                processed_ids.append(item.get("gmail_id", ""))
+        item["dry_run"] = dry_run
 
     pending["processed"] = processed_ids
     save_pending(pending)
