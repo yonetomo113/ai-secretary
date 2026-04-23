@@ -415,16 +415,14 @@ def submit_assift_shift(
                 browser.close()
                 return True
 
-            submitted = _submit_form(page)
-            _screenshot(page, "04_submitted" if submitted else "04_submit_failed")
-
-            if submitted:
-                log(f"送信完了: {reservation['property']} {shift_date}")
-            else:
-                log("送信ボタンが見つかりませんでした（手動確認が必要）")
+            # assift はセルクリックで即時登録（送信ボタン不要）
+            # モーダルが出る場合のみ _submit_form が機能する
+            _submit_form(page)
+            _screenshot(page, "04_done")
+            log(f"送信完了: {reservation['property']} {shift_date}")
 
             browser.close()
-            return submitted
+            return True
 
         except PlaywrightTimeout as e:
             _screenshot(page, "error_timeout")
