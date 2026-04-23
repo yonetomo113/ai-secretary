@@ -120,3 +120,9 @@
 morning_briefing.py・property_scout.py等を修正した場合、
 テスト確認後に必ずgit add → git commit → git pushまで実行すること。
 pushなしで作業完了と報告することを禁止する。
+
+## 作業完了ルール
+- 作業完了時は必ず `git add . && git commit && git push` を実行する
+- コミットメッセージは `[自動] {変更内容の要約}` 形式にする
+- crontab変更時も必ずコミット対象に含める
+- 実装前に必ずplanモードで設計を出してから書く
