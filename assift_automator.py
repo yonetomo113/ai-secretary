@@ -107,6 +107,14 @@ def _get_gmail_service_xedge():
         log(f"ERROR: credentials.json が見つかりません: {CREDENTIALS}")
         return None
 
+    # CI 環境ではブラウザ認証不可。トークン再登録が必要。
+    if os.environ.get("GITHUB_ACTIONS"):
+        log("ERROR: xedge トークンが失効しています。GOOGLE_TOKEN_XEDGE_PICKLE_B64 シークレットの再登録が必要です。")
+        log("  1. ローカルで python assift_automator.py --dry-run を実行して再認証")
+        log("  2. base64 -i ~/.config/ai-secretary/token_xedge.pickle | tr -d '\\n'")
+        log("  3. GitHub Secrets > GOOGLE_TOKEN_XEDGE_PICKLE_B64 を上記の値で更新")
+        sys.exit(1)
+
     print("\n" + "=" * 60)
     print("【xedgeltd@gmail.com の Google認証が必要です】")
     print("ブラウザが開いたら xedgeltd@gmail.com でログインしてください。")
