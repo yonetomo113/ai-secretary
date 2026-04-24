@@ -4,7 +4,7 @@
 assift_automator.py — Airbnb予約メール → assift シフト自動登録
 
 フロー:
-  1. Gmail (xedgeltd@gmail.com) から未処理のAirbnb予約メールを取得
+  1. Gmail (g.kamifor@gmail.com) から未処理のAirbnb予約メールを取得
   2. チェックアウト日 = 清掃シフト日として抽出
   3. config/shift-urls.md から物件→assift URL を取得
   4. Playwright で assift シフト提出フォームを操作
@@ -17,7 +17,7 @@ assift_automator.py — Airbnb予約メール → assift シフト自動登録
 
 前提条件:
   - ~/.config/ai-secretary/credentials.json（Google Cloud OAuthクライアント）
-  - 初回実行時にブラウザが開き xedgeltd@gmail.com でのOAuth認証が必要
+  - 初回実行時にブラウザが開き g.kamifor@gmail.com でのOAuth認証が必要
   - config/shift-urls.md に物件ごとの assift URL が登録済みであること
 
 注意事項:
@@ -53,19 +53,19 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 BASE_DIR       = Path(__file__).parent
 CONFIG_DIR     = Path.home() / ".config" / "ai-secretary"
 CREDENTIALS    = CONFIG_DIR / "credentials.json"
-TOKEN_XEDGE    = CONFIG_DIR / "token_xedge.pickle"   # xedgeltd@gmail.com
+TOKEN          = CONFIG_DIR / "token.pickle"           # g.kamifor@gmail.com
 SHIFT_URLS_MD  = BASE_DIR / "config" / "shift-urls.md"
 SHIFT_PENDING  = Path.home() / "Context" / "shift_pending.json"
 SCREENSHOT_DIR = BASE_DIR / "logs" / "assift_screenshots"
 
 JST = timezone(timedelta(hours=9))
 
-SCOPES_XEDGE = [
+SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
 
-# Airbnb予約メール検索クエリ（xedgeltd@gmail.com）
+# Airbnb予約メール検索クエリ（g.kamifor@gmail.com）
 # 日本語件名（ご予約）と英語件名（confirmed/reservation）の両方をカバー。
 # 本文パースで対象物件に絞る。「ご予約」のみにすると英語通知がスキップされるため注意。
 AIRBNB_QUERY = "from:airbnb.com (ご予約 OR confirmed OR reservation) newer_than:30d"
@@ -83,12 +83,12 @@ def log(msg: str):
 
 
 # ─────────────────────────────────────────────
-# Google OAuth（xedgeltd 用）
+# Google OAuth（g.kamifor 用）
 # ─────────────────────────────────────────────
-def _get_gmail_service_xedge():
+def _get_gmail_service():
     creds = None
-    if TOKEN_XEDGE.exists():
-        with open(TOKEN_XEDGE, "rb") as f:
+    if TOKEN.exists():
+        with open(TOKEN, "rb") as f:
             creds = pickle.load(f)
 
     if creds and creds.valid:
@@ -97,11 +97,11 @@ def _get_gmail_service_xedge():
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            with open(TOKEN_XEDGE, "wb") as f:
+            with open(TOKEN, "wb") as f:
                 pickle.dump(creds, f)
             return build("gmail", "v1", credentials=creds)
         except Exception as e:
-            log(f"xedge トークンリフレッシュ失敗: {e}")
+            log(f"トークンリフレッシュ失敗: {e}")
 
     if not CREDENTIALS.exists():
         log(f"ERROR: credentials.json が見つかりません: {CREDENTIALS}")
@@ -109,21 +109,21 @@ def _get_gmail_service_xedge():
 
     # CI 環境ではブラウザ認証不可。トークン再登録が必要。
     if os.environ.get("GITHUB_ACTIONS"):
-        log("ERROR: xedge トークンが失効しています。GOOGLE_TOKEN_XEDGE_PICKLE_B64 シークレットの再登録が必要です。")
+        log("ERROR: トークンが失効しています。GOOGLE_TOKEN_PICKLE_B64 シークレットの再登録が必要です。")
         log("  1. ローカルで python assift_automator.py --dry-run を実行して再認証")
-        log("  2. base64 -i ~/.config/ai-secretary/token_xedge.pickle | tr -d '\\n'")
-        log("  3. GitHub Secrets > GOOGLE_TOKEN_XEDGE_PICKLE_B64 を上記の値で更新")
+        log("  2. base64 -i ~/.config/ai-secretary/token.pickle | tr -d '\\n'")
+        log("  3. GitHub Secrets > GOOGLE_TOKEN_PICKLE_B64 を上記の値で更新")
         sys.exit(1)
 
     print("\n" + "=" * 60)
-    print("【xedgeltd@gmail.com の Google認証が必要です】")
-    print("ブラウザが開いたら xedgeltd@gmail.com でログインしてください。")
+    print("【g.kamifor@gmail.com の Google認証が必要です】")
+    print("ブラウザが開いたら g.kamifor@gmail.com でログインしてください。")
     print("=" * 60 + "\n")
 
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS), SCOPES_XEDGE)
-    creds = flow.run_local_server(port=0, login_hint="xedgeltd@gmail.com", prompt="consent")
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS), SCOPES)
+    creds = flow.run_local_server(port=0, login_hint="g.kamifor@gmail.com", prompt="consent")
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(TOKEN_XEDGE, "wb") as f:
+    with open(TOKEN, "wb") as f:
         pickle.dump(creds, f)
     return build("gmail", "v1", credentials=creds)
 
@@ -361,11 +361,11 @@ def sync_airbnb_to_pending(service=None) -> tuple[int, list]:
     Airbnb予約メールをパースして shift_pending.json に status="未登録" で追記する。
     Playwright は使わない。morning_briefing.py からも呼び出し可能。
 
-    service: xedgeltd@gmail.com の Gmail API サービス。None の場合は内部取得。
+    service: g.kamifor@gmail.com の Gmail API サービス。None の場合は内部取得。
     Returns: (新規追加数, 追加されたアイテムリスト)
     """
     if service is None:
-        service = _get_gmail_service_xedge()
+        service = _get_gmail_service()
         if service is None:
             return 0, []
 
@@ -612,7 +612,7 @@ def _submit_form(page) -> bool:
 def run(dry_run: bool = False, debug: bool = False):
     log("=== assift_automator 開始 ===")
 
-    service = _get_gmail_service_xedge()
+    service = _get_gmail_service()
     if service is None:
         log("ERROR: Gmail サービス取得失敗")
         sys.exit(1)

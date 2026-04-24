@@ -35,7 +35,6 @@ jobs:
         env:
           GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
           GOOGLE_TOKEN_PICKLE_B64: ${{ secrets.GOOGLE_TOKEN_PICKLE_B64 }}
-          GOOGLE_TOKEN_XEDGE_PICKLE_B64: ${{ secrets.GOOGLE_TOKEN_XEDGE_PICKLE_B64 }}
         run: python ci/setup_google_creds.py
 
       - name: assift シフト自動割当を実行
