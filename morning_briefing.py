@@ -162,6 +162,16 @@ def get_google_creds(reauth=False):
             "APIとサービス > 認証情報 > OAuth 2.0クライアントID からダウンロードしてください。"
         )
 
+    # CI環境ではブラウザ認証不可 → 明確なエラーで終了
+    if os.environ.get("CI"):
+        raise RuntimeError(
+            "Google OAuthトークン（g.kamifor）が失効しています。\n"
+            "ローカルで再認証後、GitHub Secretsを更新してください:\n"
+            "  python3 morning_briefing.py  # ブラウザ認証を完了させる\n"
+            "  base64 -i ~/.config/ai-secretary/token.pickle | tr -d '\\n'\n"
+            "  → GitHub Settings > Secrets > GOOGLE_TOKEN_PICKLE_B64 を更新"
+        )
+
     print("\n" + "=" * 60)
     print("【Google認証が必要です】")
     print("ブラウザが開いたら  g.kamifor@gmail.com  でログインしてください。")
