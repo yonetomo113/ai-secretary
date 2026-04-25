@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-wp_buffer_integration.py — Geminiでブログ下書き＋Bufferコピーを生成しWordPress投稿
+wp_buffer_integration.py — Claudeでブログ下書き＋Bufferコピーを生成しWordPress投稿
 
 フロー:
   1. 環境変数 TOPIC（またはデフォルトトピック）を取得
-  2. Gemini API でブログ本文（約1000字）とBuffer用SNSコピーを生成
+  2. Anthropic API でブログ本文（約1000字）とBuffer用SNSコピーを生成
   3. WordPress REST API でブログを下書き保存
   4. Buffer用コピーを buffer_copy.txt に書き出す
 
@@ -14,12 +14,12 @@ wp_buffer_integration.py — Geminiでブログ下書き＋Bufferコピーを生
   python3 wp_buffer_integration.py  # デフォルトトピック使用
 
 前提条件:
-  - 環境変数 WP_USER, WP_APP_PASSWORD, WP_BASE_URL, GEMINI_API_KEY が設定済み
+  - 環境変数 WP_USER, WP_APP_PASSWORD, WP_BASE_URL, ANTHROPIC_API_KEY が設定済み
   - WP_BASE_URL 例: https://example.com/wp-json/wp/v2
 
 注意事項:
   - WordPress投稿は status="draft"（下書き）で保存。公開は手動で行う
-  - Gemini API 呼び出し失敗時は RuntimeError を送出してスクリプトを終了する
+  - Anthropic API 呼び出し失敗時は RuntimeError を送出してスクリプトを終了する
   - buffer_copy.txt は毎回上書きされる
 """
 
@@ -29,6 +29,7 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+import anthropic
 import requests
 
 # ─────────────────────────────────────────────
@@ -36,17 +37,13 @@ import requests
 # ─────────────────────────────────────────────
 JST = timezone(timedelta(hours=9))
 
-WP_USER         = os.environ["WP_USER"]
-WP_APP_PASSWORD = os.environ["WP_APP_PASSWORD"]
-WP_BASE_URL     = os.environ["WP_BASE_URL"].rstrip("/")
-GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]
+WP_USER           = os.environ["WP_USER"]
+WP_APP_PASSWORD   = os.environ["WP_APP_PASSWORD"]
+WP_BASE_URL       = os.environ["WP_BASE_URL"].rstrip("/")
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
 DEFAULT_TOPIC = "広島の民泊・旅館運営で役立つ清掃チェックリスト"
-GEMINI_MODEL  = "gemini-2.0-flash"
-GEMINI_URL    = (
-    f"https://generativelanguage.googleapis.com/v1beta/models"
-    f"/{GEMINI_MODEL}:generateContent"
-)
+CLAUDE_MODEL  = "claude-haiku-4-5-20251001"
 
 BUFFER_OUTPUT = Path(__file__).parent / "buffer_copy.txt"
 
@@ -57,7 +54,7 @@ def log(msg: str) -> None:
 
 
 # ─────────────────────────────────────────────
-# Gemini 生成
+# Claude 生成
 # ─────────────────────────────────────────────
 def generate_content(topic: str) -> tuple[str, str]:
     """ブログ本文（約1000字）とBuffer用SNSコピーを返す。"""
@@ -74,27 +71,20 @@ def generate_content(topic: str) -> tuple[str, str]:
 （ここにX/Twitter用SNSコピーを140字以内。ハッシュタグ2〜3個含む）
 """
 
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1500},
-    }
-
-    resp = requests.post(
-        GEMINI_URL,
-        params={"key": GEMINI_API_KEY},
-        json=payload,
-        timeout=60,
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
     )
-    if not resp.ok:
-        raise RuntimeError(f"Gemini API エラー: {resp.status_code} {resp.text[:200]}")
 
-    text: str = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+    text: str = message.content[0].text
 
     blog_part   = _extract_section(text, "---BLOG---",   "---BUFFER---")
     buffer_part = _extract_section(text, "---BUFFER---", None)
 
     if not blog_part:
-        raise RuntimeError(f"Gemini レスポンスからブログ本文を抽出できませんでした:\n{text[:300]}")
+        raise RuntimeError(f"Claudeレスポンスからブログ本文を抽出できませんでした:\n{text[:300]}")
 
     return blog_part.strip(), buffer_part.strip()
 
@@ -149,7 +139,7 @@ def main() -> None:
     topic = os.environ.get("TOPIC", DEFAULT_TOPIC)
     log(f"トピック: {topic}")
 
-    log("Gemini でコンテンツ生成中...")
+    log("Claude でコンテンツ生成中...")
     blog_content, buffer_copy = generate_content(topic)
     log(f"ブログ本文: {len(blog_content)}字 / Bufferコピー: {len(buffer_copy)}字")
 
