@@ -39,7 +39,7 @@ CONTEXT_DIR     = HOME / "Context"
 DAILY_MEMO_DIR  = CONTEXT_DIR / "daily_memo"
 DRAFT_DIR       = CONTEXT_DIR / "content_draft"
 PENDING_FILE    = CONTEXT_DIR / "content_pending.json"
-BLOG_STYLE_FILE = CONTEXT_DIR / "blog_style.md"
+BLOG_STYLE_FILE = REPO_DIR / "config" / "blog_style_summary.md"
 X_CACHE_FILE    = REPO_DIR / "data" / "x_posts_cache.json"
 
 X_USERNAME      = "yonetomo113"
