@@ -105,7 +105,7 @@ def _fetch_x_api(bearer: str) -> list[str]:
         X_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
         X_CACHE_FILE.write_text(
             json.dumps(
-                {"posts": tweets, "cached_at": datetime.now(JST).isoformat()},
+                {"posts": tweets, "updated_at": datetime.now(JST).isoformat()},
                 ensure_ascii=False,
                 indent=2,
             ),
