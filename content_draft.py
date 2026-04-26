@@ -39,7 +39,9 @@ CONTEXT_DIR     = HOME / "Context"
 DAILY_MEMO_DIR  = CONTEXT_DIR / "daily_memo"
 DRAFT_DIR       = CONTEXT_DIR / "content_draft"
 PENDING_FILE    = CONTEXT_DIR / "content_pending.json"
-BLOG_STYLE_FILE = REPO_DIR / "config" / "blog_style_summary.md"
+# ローカルに全文版があればそちらを優先、なければリポジトリ同梱のsummaryを使用
+_full_style = HOME / "Context" / "blog_style.md"
+BLOG_STYLE_FILE = _full_style if _full_style.exists() else REPO_DIR / "config" / "blog_style_summary.md"
 X_CACHE_FILE    = REPO_DIR / "data" / "x_posts_cache.json"
 
 X_USERNAME      = "yonetomo113"
