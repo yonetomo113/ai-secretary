@@ -4,48 +4,53 @@
 wp_buffer_integration.py — Claudeでブログ下書き＋Bufferコピーを生成しWordPress投稿
 
 フロー:
-  1. 環境変数 TOPIC（またはデフォルトトピック）を取得
-  2. Anthropic API でブログ本文（約1000字）とBuffer用SNSコピーを生成
-  3. WordPress REST API でブログを下書き保存
-  4. Buffer用コピーを buffer_copy.txt に書き出す
+  1. x_posts_cache.json から直近7日のX投稿を読み込む
+  2. blog_style_summary.md から文体ガイドを読み込む
+  3. Claudeでテーマを動的選定（X投稿を起点に）
+  4. Claudeでブログ本文（約1000字）とBuffer用SNSコピーを生成
+  5. WordPress REST API でブログを下書き保存
+  6. Buffer用コピーを buffer_copy.txt に書き出す
 
 使い方:
-  TOPIC="民泊清掃のコツ" python3 wp_buffer_integration.py
-  python3 wp_buffer_integration.py  # デフォルトトピック使用
+  python3 wp_buffer_integration.py                      # X投稿からテーマ自動選定
+  TOPIC="民泊清掃のコツ" python3 wp_buffer_integration.py  # テーマ指定
 
 前提条件:
   - 環境変数 WP_USER, WP_APP_PASSWORD, WP_BASE_URL, ANTHROPIC_API_KEY が設定済み
-  - WP_BASE_URL 例: https://example.com/wp-json/wp/v2
-
-注意事項:
-  - WordPress投稿は status="draft"（下書き）で保存。公開は手動で行う
-  - Anthropic API 呼び出し失敗時は RuntimeError を送出してスクリプトを終了する
-  - buffer_copy.txt は毎回上書きされる
+  - data/x_posts_cache.json（fetch_x_posts.py で生成）があると多様なテーマが選定される
 """
 
 import base64
+import json
 import os
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import anthropic
 import requests
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / ".env")
+except ImportError:
+    pass
+
 # ─────────────────────────────────────────────
 # 設定
 # ─────────────────────────────────────────────
 JST = timezone(timedelta(hours=9))
+REPO_DIR = Path(__file__).parent
 
 WP_USER           = os.environ["WP_USER"]
 WP_APP_PASSWORD   = os.environ["WP_APP_PASSWORD"]
 WP_BASE_URL       = os.environ["WP_BASE_URL"].rstrip("/")
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 
-DEFAULT_TOPIC = "広島の民泊・旅館運営で役立つ清掃チェックリスト"
-CLAUDE_MODEL  = "claude-haiku-4-5-20251001"
-
-BUFFER_OUTPUT = Path(__file__).parent / "buffer_copy.txt"
+CLAUDE_MODEL    = "claude-haiku-4-5-20251001"
+X_CACHE_FILE    = REPO_DIR / "data" / "x_posts_cache.json"
+BLOG_STYLE_FILE = REPO_DIR / "config" / "blog_style_summary.md"
+BUFFER_OUTPUT   = REPO_DIR / "buffer_copy.txt"
 
 
 def log(msg: str) -> None:
@@ -54,40 +59,89 @@ def log(msg: str) -> None:
 
 
 # ─────────────────────────────────────────────
-# Claude 生成
+# X投稿読み込み
 # ─────────────────────────────────────────────
-def generate_content(topic: str) -> tuple[str, str]:
-    """ブログ本文（約1000字）とBuffer用SNSコピーを返す。"""
-    prompt = f"""あなたは民泊・旅館運営の専門家ブロガーです。
-以下のトピックについて、WordPressブログ記事の本文を日本語で1000字程度で書いてください。
-読者は民泊オーナーや宿泊施設経営者です。
 
-トピック: {topic}
+def _within_7days(created_at: str) -> bool:
+    if not created_at:
+        return True
+    try:
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        return datetime.now(timezone.utc) - dt <= timedelta(days=7)
+    except ValueError:
+        return True
 
-【出力フォーマット】
----BLOG---
-（ここにブログ本文を1000字程度）
----BUFFER---
-（ここにX/Twitter用SNSコピーを140字以内。ハッシュタグ2〜3個含む）
-"""
+
+def load_x_posts() -> list[str]:
+    if not X_CACHE_FILE.exists():
+        log("  x_posts_cache.json が存在しません（Xデータなしで続行）")
+        return []
+    try:
+        data = json.loads(X_CACHE_FILE.read_text(encoding="utf-8"))
+        posts = [
+            p["text"] for p in data.get("posts", [])
+            if _within_7days(p.get("created_at", ""))
+        ]
+        log(f"  Xキャッシュ読み込み: {len(posts)}件（更新: {data.get('updated_at', '不明')}）")
+        return posts
+    except Exception as e:
+        log(f"  Xキャッシュ読み込みエラー: {e}")
+        return []
+
+
+# ─────────────────────────────────────────────
+# 文体ガイド読み込み
+# ─────────────────────────────────────────────
+
+def load_blog_style() -> str:
+    if not BLOG_STYLE_FILE.exists():
+        log("  blog_style_summary.md が見つかりません（文体ガイドなしで生成）")
+        return ""
+    text = BLOG_STYLE_FILE.read_text(encoding="utf-8")
+    end = text.find("## 記事一覧")
+    style = text[:end].strip() if end > 0 else text
+    trimmed = style[:3000]
+    log(f"  blog_style読み込み: {len(trimmed)}字")
+    return trimmed
+
+
+# ─────────────────────────────────────────────
+# テーマ動的選定
+# ─────────────────────────────────────────────
+
+def select_theme(x_posts: list[str], today: datetime) -> str:
+    if not x_posts:
+        fallback = f"旅館・民泊運営の現場レポート（{today.strftime('%Y年%m月%d日')}）"
+        log(f"  X投稿なし → フォールバックテーマ: {fallback}")
+        return fallback
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    message = client.messages.create(
+    posts_text = "\n".join(f"- {p}" for p in x_posts[:10])
+
+    msg = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=1500,
-        messages=[{"role": "user", "content": prompt}],
+        max_tokens=150,
+        messages=[{"role": "user", "content": f"""旅館オーナー（米岡朋彦）のブログ記事テーマを1つ選んでください。
+
+【直近のX投稿】
+{posts_text}
+
+今日の日付: {today.strftime("%Y年%m月%d日")}
+
+上記のX投稿を起点に、ブログ記事として自然に展開できる具体的なテーマを1つ選び、
+「テーマ: ○○」という形式で1行だけ返してください。
+「清掃チェックリスト」のような汎用テーマは避け、エピソードや気づきを軸にしてください。"""}]
     )
 
-    text: str = message.content[0].text
+    theme_line = msg.content[0].text.strip()
+    theme = theme_line.split(":", 1)[-1].strip() if ":" in theme_line else theme_line
+    log(f"  テーマ選定: {theme}")
+    return theme
 
-    blog_part   = _extract_section(text, "---BLOG---",   "---BUFFER---")
-    buffer_part = _extract_section(text, "---BUFFER---", None)
 
-    if not blog_part:
-        raise RuntimeError(f"Claudeレスポンスからブログ本文を抽出できませんでした:\n{text[:300]}")
-
-    return blog_part.strip(), buffer_part.strip()
-
+# ─────────────────────────────────────────────
+# Claude 生成
+# ─────────────────────────────────────────────
 
 def _extract_section(text: str, start_marker: str, end_marker: str | None) -> str:
     start = text.find(start_marker)
@@ -100,21 +154,78 @@ def _extract_section(text: str, start_marker: str, end_marker: str | None) -> st
     return text[start:]
 
 
+def generate_content(theme: str, x_posts: list[str], blog_style: str) -> tuple[str, str, str]:
+    """(タイトル, ブログ本文, Bufferコピー) を返す。"""
+    x_section = ""
+    if x_posts:
+        x_section = (
+            "【直近のX投稿（記事の起点・雰囲気の参考）】\n"
+            + "\n".join(f"- {p}" for p in x_posts[:8])
+        )
+
+    style_section = ""
+    if blog_style:
+        style_section = f"\n【文体ガイド（必ず従うこと）】\n{blog_style}"
+
+    prompt = f"""あなたは有限会社クロスエッジの代表・米岡朋彦（おかぴこ）本人のブログライターです。
+テーマ「{theme}」でWordPressブログ記事を日本語で1000字程度で書いてください。
+
+{x_section}
+
+{style_section}
+
+【執筆ルール】
+- 一人称は「僕」（「私」は使わない）
+- 広島・大竹・竹屋旅籠・登竜庵への言及を自然に入れる
+- X投稿がある場合はその出来事・気づきを導入に使う
+- 「ｗ」「知らんけど」「うーん」などの口癖を自然に入れる
+- 短文と長文を交互に混ぜてリズムに緩急をつける
+
+【出力フォーマット】
+---BLOG---
+TITLE: （SEOを意識したタイトル）
+
+（ブログ本文1000字程度）
+---BUFFER---
+（X/Twitter用SNSコピーを140字以内。ハッシュタグ2〜3個含む）
+"""
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    message = client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    text: str = message.content[0].text
+    blog_raw    = _extract_section(text, "---BLOG---",   "---BUFFER---")
+    buffer_part = _extract_section(text, "---BUFFER---", None)
+
+    if not blog_raw:
+        raise RuntimeError(f"Claudeレスポンスからブログ本文を抽出できませんでした:\n{text[:300]}")
+
+    # TITLE: 行をタイトルとして分離
+    title = theme
+    body_lines = []
+    for line in blog_raw.strip().splitlines():
+        if line.startswith("TITLE:") and title == theme:
+            title = line.replace("TITLE:", "").strip()
+        else:
+            body_lines.append(line)
+    body = "\n".join(body_lines).strip()
+
+    return title, body, buffer_part.strip()
+
+
 # ─────────────────────────────────────────────
 # WordPress 投稿
 # ─────────────────────────────────────────────
+
 def post_to_wordpress(title: str, content: str) -> str:
     """WordPressに下書き投稿して管理画面編集URLを返す。"""
     token = base64.b64encode(f"{WP_USER}:{WP_APP_PASSWORD}".encode()).decode()
-    headers = {
-        "Authorization": f"Basic {token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "title":   title,
-        "content": content,
-        "status":  "draft",
-    }
+    headers = {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
+    payload = {"title": title, "content": content, "status": "draft"}
 
     # LiteSpeed環境では /wp-json/ ルーティングが機能しないため ?rest_route= 経由で投稿
     site_url = WP_BASE_URL.replace("/wp-json/wp/v2", "")
@@ -128,34 +239,49 @@ def post_to_wordpress(title: str, content: str) -> str:
         raise RuntimeError(f"WordPress投稿エラー: {resp.status_code} {resp.text[:200]}")
 
     post_id: int = resp.json()["id"]
-    site_url = WP_BASE_URL.replace("/wp-json/wp/v2", "")
     return f"{site_url}/wp-admin/post.php?post={post_id}&action=edit"
 
 
 # ─────────────────────────────────────────────
 # メイン
 # ─────────────────────────────────────────────
+
 def main() -> None:
-    topic = os.environ.get("TOPIC", DEFAULT_TOPIC)
-    log(f"トピック: {topic}")
+    today = datetime.now(JST)
+    log(f"=== wp_buffer_integration.py 開始 {today.strftime('%Y-%m-%d %H:%M')} ===")
 
-    log("Claude でコンテンツ生成中...")
-    blog_content, buffer_copy = generate_content(topic)
-    log(f"ブログ本文: {len(blog_content)}字 / Bufferコピー: {len(buffer_copy)}字")
+    log("X投稿読み込み中...")
+    x_posts = load_x_posts()
 
-    title = f"【下書き】{topic}｜{datetime.now(JST).strftime('%Y年%m月%d日')}"
+    log("文体ガイド読み込み中...")
+    blog_style = load_blog_style()
+
+    # TOPIC環境変数があれば優先、なければX投稿から動的選定
+    if os.environ.get("TOPIC"):
+        theme = os.environ["TOPIC"]
+        log(f"テーマ（環境変数）: {theme}")
+    else:
+        log("テーマ選定中（X投稿から）...")
+        theme = select_theme(x_posts, today)
+
+    log(f"コンテンツ生成中（テーマ: {theme}）...")
+    title, blog_content, buffer_copy = generate_content(theme, x_posts, blog_style)
+    log(f"  タイトル: {title}")
+    log(f"  ブログ本文: {len(blog_content)}字 / Bufferコピー: {len(buffer_copy)}字")
 
     log("WordPress に下書き保存中...")
     edit_url = post_to_wordpress(title, blog_content)
-    log(f"投稿完了: {edit_url}")
+    log(f"  投稿完了: {edit_url}")
 
     BUFFER_OUTPUT.write_text(buffer_copy, encoding="utf-8")
-    log(f"Bufferコピー保存: {BUFFER_OUTPUT}")
+    log(f"  Bufferコピー保存: {BUFFER_OUTPUT}")
 
     print("\n" + "=" * 50)
+    print(f"タイトル: {title}")
     print(f"下書きURL: {edit_url}")
     print(f"Bufferコピー:\n{buffer_copy}")
     print("=" * 50)
+    log("=== 完了 ===\n")
 
 
 if __name__ == "__main__":
