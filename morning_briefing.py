@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
 morning_briefing.py
-朝のブリーフィング：Gmail + Google Calendar（2アカウント）→ Claude要約 → メール送信
+朝のブリーフィング：Gmail + Google Calendar → Claude要約 → メール送信
 
-Cloud Project  : crossedge-airbnb（xedgeltd@gmail.com）
-Gmail取得      : g.kamifor@gmail.com
-Calendar取得   : g.kamifor@gmail.com + xedgeltd@gmail.com（マージ）
-送信先         : g.kamifor@gmail.com
+Gmail取得  : g.kamifor@gmail.com（通常メール + Airbnbメール）
+Calendar  : g.kamifor@gmail.com
+送信先    : g.kamifor@gmail.com
 
-credentials.json    : ~/.config/ai-secretary/credentials.json
-token.pickle        : ~/.config/ai-secretary/token.pickle        (g.kamifor)
-token_xedge.pickle  : ~/.config/ai-secretary/token_xedge.pickle  (xedgeltd)
-ログ                : ~/ai-secretary/logs/morning_briefing_YYYYMMDD.log
+credentials.json : ~/.config/ai-secretary/credentials.json
+token.pickle     : ~/.config/ai-secretary/token.pickle  (g.kamifor)
+ログ             : ~/ai-secretary/logs/morning_briefing_YYYYMMDD.log
 
 使い方:
-  python3 morning_briefing.py              # 通常実行
-  python3 morning_briefing.py --reauth     # g.kamifor を再認証
-  python3 morning_briefing.py --auth-xedge # xedgeltd を再認証
+  python3 morning_briefing.py          # 通常実行
+  python3 morning_briefing.py --reauth # g.kamifor を再認証
 """
 
 import base64
@@ -49,7 +46,6 @@ BASE_DIR    = Path(__file__).parent
 CONFIG_DIR  = Path.home() / ".config" / "ai-secretary"
 CREDENTIALS      = CONFIG_DIR / "credentials.json"
 TOKEN_FILE       = CONFIG_DIR / "token.pickle"        # g.kamifor@gmail.com
-TOKEN_FILE_XEDGE = CONFIG_DIR / "token_xedge.pickle"  # xedgeltd@gmail.com
 LOG_DIR     = BASE_DIR / "ai-secretary" / "logs"
 JST         = timezone(timedelta(hours=9))
 
@@ -64,10 +60,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar.readonly",
 ]
-SCOPES_XEDGE = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/calendar.readonly",
-]
 
 # Gmail検索クエリ（g.kamifor@gmail.com のメールボックス）
 GMAIL_QUERIES = {
@@ -77,7 +69,7 @@ GMAIL_QUERIES = {
     "清掃":           "subject:(清掃 OR クリーニング OR cleaning) newer_than:3d",
 }
 
-# Airbnb検索クエリ（xedgeltd@gmail.com のメールボックス）
+# Airbnb検索クエリ（g.kamifor@gmail.com のメールボックス）
 AIRBNB_QUERIES = {
     "チェックイン": (
         "from:airbnb.com "
@@ -191,53 +183,6 @@ def get_google_creds(reauth=False):
     return creds
 
 
-def get_google_creds_xedge(reauth=False):
-    """xedgeltd@gmail.com 用 OAuth（Gmail + Calendar）"""
-    if reauth and TOKEN_FILE_XEDGE.exists():
-        TOKEN_FILE_XEDGE.unlink()
-        log("token_xedge.pickle を削除しました（再認証）")
-
-    creds = None
-    if TOKEN_FILE_XEDGE.exists():
-        with open(TOKEN_FILE_XEDGE, "rb") as f:
-            creds = pickle.load(f)
-
-    if creds and creds.valid:
-        return creds
-
-    if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
-            with open(TOKEN_FILE_XEDGE, "wb") as f:
-                pickle.dump(creds, f)
-            log("token_xedge.pickle を更新しました")
-            return creds
-        except Exception as e:
-            log(f"xedge トークンリフレッシュ失敗: {e} → 再認証します")
-            if TOKEN_FILE_XEDGE.exists():
-                TOKEN_FILE_XEDGE.unlink()
-
-    if not CREDENTIALS.exists():
-        raise FileNotFoundError(f"credentials.json が見つかりません: {CREDENTIALS}")
-
-    print("\n" + "=" * 60)
-    print("【xedgeltd@gmail.com の Google認証が必要です】")
-    print("ブラウザが開いたら  xedgeltd@gmail.com  でログインしてください。")
-    print("=" * 60 + "\n")
-
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS), SCOPES_XEDGE)
-    creds = flow.run_local_server(
-        port=0,
-        login_hint="xedgeltd@gmail.com",
-        prompt="consent",
-    )
-
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(TOKEN_FILE_XEDGE, "wb") as f:
-        pickle.dump(creds, f)
-    log(f"token_xedge.pickle を保存しました: {TOKEN_FILE_XEDGE}")
-    return creds
-
 
 # ── Gmail ─────────────────────────────────────────────────────────
 def fetch_gmail(service, query, max_results=10):
@@ -277,12 +222,12 @@ def gmail_section(service):
     return "\n".join(lines)
 
 
-def airbnb_section(xedge_gmail_service):
-    """xedgeltd@gmail.com のAirbnb予約メールを取得して表示"""
-    lines = ["\n### Airbnb予約メール（xedgeltd）"]
+def airbnb_section(gmail_service):
+    """g.kamifor@gmail.com のAirbnb予約メールを取得して表示"""
+    lines = ["\n### Airbnb予約メール"]
     found_any = False
     for label, query in AIRBNB_QUERIES.items():
-        items = fetch_gmail(xedge_gmail_service, query, max_results=5)
+        items = fetch_gmail(gmail_service, query, max_results=5)
         if not items:
             continue
         found_any = True
@@ -333,41 +278,25 @@ def fetch_events(service):
     return filtered
 
 
-def calendar_section(gkami_service, xedge_service=None):
-    """g.kamifor + xedgeltd のカレンダーをマージして表示"""
+def calendar_section(gkami_service):
+    """g.kamifor@gmail.com のカレンダーを表示"""
     jst_today = datetime.now(JST)
+    events = fetch_events(gkami_service)
 
-    # g.kamifor のイベント
-    gkami_events = [(e, "g.kamifor") for e in fetch_events(gkami_service)]
+    def sort_key(e):
+        return e["start"].get("dateTime", e["start"].get("date", ""))
 
-    # xedgeltd のイベント
-    xedge_events = []
-    if xedge_service:
-        try:
-            xedge_events = [(e, "xedgeltd") for e in fetch_events(xedge_service)]
-        except Exception as ex:
-            log(f"xedgeltd カレンダー取得失敗（スキップ）: {ex}")
-
-    # 時刻でソートしてマージ
-    all_events = gkami_events + xedge_events
-
-    def sort_key(item):
-        e = item[0]
-        start = e["start"].get("dateTime", e["start"].get("date", ""))
-        return start
-
-    all_events.sort(key=sort_key)
+    events.sort(key=sort_key)
 
     lines = [f"\n### 本日のカレンダー（{jst_today.strftime('%Y-%m-%d %a')}）"]
-    if not all_events:
+    if not events:
         lines.append("  予定なし")
-    for e, account in all_events:
+    for e in events:
         start = e["start"].get("dateTime", e["start"].get("date", ""))
         t = datetime.fromisoformat(start).astimezone(JST).strftime("%H:%M") \
             if "T" in start else "終日"
-        title  = e.get("summary", "(タイトルなし)")
-        label  = f" [{account}]" if xedge_service else ""
-        lines.append(f"  {t}  {title}{label}")
+        title = e.get("summary", "(タイトルなし)")
+        lines.append(f"  {t}  {title}")
     return "\n".join(lines)
 
 
@@ -596,7 +525,6 @@ def _pending_shifts_section() -> str:
 # ── メイン ────────────────────────────────────────────────────────
 def main():
     reauth      = "--reauth"     in sys.argv
-    auth_xedge  = "--auth-xedge" in sys.argv
     log_path    = setup_log()
     now_str     = datetime.now(JST).strftime("%Y-%m-%d %H:%M")
 
@@ -609,35 +537,20 @@ def main():
     cal_gkami   = build("calendar", "v3", credentials=creds_gkami)
     log("g.kamifor 認証完了")
 
-    # xedgeltd@gmail.com 認証（Gmail + Calendar）
-    log("Google認証中（xedgeltd@gmail.com）...")
-    gmail_xedge = None
-    cal_xedge   = None
-    try:
-        creds_xedge = get_google_creds_xedge(reauth=auth_xedge)
-        gmail_xedge = build("gmail",    "v1", credentials=creds_xedge)
-        cal_xedge   = build("calendar", "v3", credentials=creds_xedge)
-        log("xedgeltd 認証完了")
-    except Exception as e:
-        log(f"xedgeltd 認証失敗（スキップ）: {e}")
-
     # データ収集
     log("Gmail取得中（g.kamifor）...")
     g_text = gmail_section(gmail_sv)
 
-    log("カレンダー取得中（両アカウント）...")
-    c_text = calendar_section(cal_gkami, cal_xedge)
+    log("カレンダー取得中（g.kamifor）...")
+    c_text = calendar_section(cal_gkami)
 
-    log("Airbnb予約メール取得中（xedgeltd）...")
-    if gmail_xedge:
-        a_text = airbnb_section(gmail_xedge)
-    else:
-        a_text = "\n### Airbnb予約メール（xedgeltd）\n  （xedgeltd 認証失敗のためスキップ）"
+    log("Airbnb予約メール取得中（g.kamifor）...")
+    a_text = airbnb_section(gmail_sv)
 
     # Airbnb予約を shift_pending.json にキュー（Playwright なし）
-    if gmail_xedge and sync_airbnb_to_pending is not None:
+    if sync_airbnb_to_pending is not None:
         try:
-            new_count, _ = sync_airbnb_to_pending(gmail_xedge)
+            new_count, _ = sync_airbnb_to_pending(gmail_sv)
             if new_count:
                 log(f"新規Airbnb予約 {new_count} 件をシフトキューに追加")
         except Exception as e:

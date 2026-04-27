@@ -6,14 +6,12 @@ base64エンコードしてGitHub Secretsに登録しておく方式。
 morning_briefing.py 実行前に本スクリプトを実行すること。
 
 必要な GitHub Secrets:
-  GOOGLE_CREDENTIALS_B64      - credentials.json の base64エンコード値
-  GOOGLE_TOKEN_PICKLE_B64     - token.pickle の base64エンコード値 (g.kamifor)
-  GOOGLE_TOKEN_XEDGE_PICKLE_B64 - token_xedge.pickle の base64エンコード値 (xedgeltd、morning_briefing のみ必要)
+  GOOGLE_CREDENTIALS_B64  - credentials.json の base64エンコード値
+  GOOGLE_TOKEN_PICKLE_B64 - token.pickle の base64エンコード値 (g.kamifor)
 
 ローカルでの値取得コマンド:
-  base64 -i ~/.config/ai-secretary/credentials.json       | tr -d '\\n'
-  base64 -i ~/.config/ai-secretary/token.pickle           | tr -d '\\n'
-  base64 -i ~/.config/ai-secretary/token_xedge.pickle     | tr -d '\\n'
+  base64 -i ~/.config/ai-secretary/credentials.json | tr -d '\\n'
+  base64 -i ~/.config/ai-secretary/token.pickle     | tr -d '\\n'
 """
 
 import base64
@@ -47,13 +45,5 @@ print(f"credentials.json 復元完了: {creds_path}")
 token_path = CONFIG_DIR / "token.pickle"
 token_path.write_bytes(base64.b64decode(os.environ["GOOGLE_TOKEN_PICKLE_B64"]))
 print(f"token.pickle 復元完了: {token_path}")
-
-# token_xedge.pickle を復元（xedgeltd: morning_briefing のみ必要、optional）
-if os.environ.get("GOOGLE_TOKEN_XEDGE_PICKLE_B64"):
-    token_xedge_path = CONFIG_DIR / "token_xedge.pickle"
-    token_xedge_path.write_bytes(base64.b64decode(os.environ["GOOGLE_TOKEN_XEDGE_PICKLE_B64"]))
-    print(f"token_xedge.pickle 復元完了: {token_xedge_path}")
-else:
-    print("token_xedge.pickle スキップ（GOOGLE_TOKEN_XEDGE_PICKLE_B64 未設定）")
 
 print("=== Google認証ファイル復元完了 ===")
