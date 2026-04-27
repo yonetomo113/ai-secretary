@@ -4,7 +4,9 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 from config import SYMBOL_NAMES, REPORT_DIR
 from rules import FLAG_BUY, FLAG_SELL, FLAG_WATCH, FLAG_WAIT, FLAG_NONE
 
@@ -39,8 +41,8 @@ def build_report(results: list[dict], date_str=None) -> str:
       ...
     ]
     """
-    today = date_str or datetime.now().strftime("%Y年%m月%d日")
-    now_str = datetime.now().strftime("%H:%M")
+    today = date_str or datetime.now(JST).strftime("%Y年%m月%d日")
+    now_str = datetime.now(JST).strftime("%H:%M")
 
     lines = []
     lines.append("=" * 60)
@@ -128,7 +130,7 @@ def build_report(results: list[dict], date_str=None) -> str:
 def save_report(report_text: str) -> str:
     """レポートをファイルに保存してパスを返す"""
     os.makedirs(REPORT_DIR, exist_ok=True)
-    filename = f"report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+    filename = f"report_{datetime.now(JST).strftime('%Y%m%d_%H%M')}.txt"
     path = os.path.join(REPORT_DIR, filename)
     with open(path, "w", encoding="utf-8") as f:
         f.write(report_text)

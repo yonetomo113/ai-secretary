@@ -12,7 +12,7 @@ def fetch_and_store():
         try:
             df = ticker.history(period=FETCH_PERIOD, interval="1d", auto_adjust=True)
         except Exception as e:
-            # 祝日・市場休場時など yfinance が None を返して内部クラッシュする場合
+            # yfinance が None を返して内部クラッシュする場合（API 障害・データ未配信等）
             print(f"取得失敗（スキップ）: {e}")
             continue
         if df is None or df.empty:

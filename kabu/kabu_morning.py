@@ -8,7 +8,9 @@
 """
 import os, sys, base64, pickle
 from email.mime.text import MIMEText
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -169,7 +171,7 @@ def build_morning_report(
     mail_subject: str,
 ) -> str:
     """Claude分析 + テクニカル分析を合わせたレポートを生成"""
-    now_str = datetime.now().strftime("%H:%M")
+    now_str = datetime.now(JST).strftime("%H:%M")
     lines = []
     lines.append("=" * 60)
     lines.append(f"  カブさん 朝刊分析レポート  {today}  {now_str}")
@@ -204,8 +206,8 @@ def send_report_email(report_text: str, date_str: str) -> None:
 
 
 def main():
-    today = datetime.now().strftime("%Y年%m月%d日")
-    print(f"\n{'='*50}\n  カブさん朝次実行  {datetime.now().strftime('%Y-%m-%d %H:%M')}\n{'='*50}\n")
+    today = datetime.now(JST).strftime("%Y年%m月%d日")
+    print(f"\n{'='*50}\n  カブさん朝次実行  {datetime.now(JST).strftime('%Y-%m-%d %H:%M')}\n{'='*50}\n")
 
     print("【Step1】株価データ取得中...")
     fetch_and_store()
