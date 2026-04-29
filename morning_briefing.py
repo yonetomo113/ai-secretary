@@ -51,7 +51,7 @@ load_dotenv(BASE_DIR / ".env")
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 SEND_FROM   = "g.kamifor@gmail.com"
 SEND_TO     = "g.kamifor@gmail.com"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-sonnet-4-6"
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
