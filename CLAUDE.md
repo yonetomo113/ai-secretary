@@ -137,3 +137,27 @@
 - crontab変更時もコミット対象に含める
 - 実装前に必ずplanモードで設計を出してから書く
 - Playwrightで楽待スクレイピングをデバッグする際はスクリーンショットを撮って確認してから修正する
+
+---
+
+## 既知のミスと対処ルール
+
+- **xedgeltd認証エラー**: morning_briefing.pyのメール送信はg.kamifor OAuth2に統一。xedgeltdは一切使わない
+- **git push忘れ**: スクリプト修正後は必ずgit pushまで完了してから報告。pushなしの報告は未完了扱い
+- **morning_briefing二重起動**: LaunchAgentとGitHub Actionsが両方動くと二重送信になる。LaunchAgentに一本化済み、GitHub ActionsのmorningジョブはLaunchAgent停止時のフォールバックのみ
+- **祝日スキップ誤作動**: morning_briefingは祝日・週末問わず毎日送信する。曜日・祝日フィルターを入れない
+
+---
+## 圧縮前スナップショット（2026-04-30 17:58 JST）
+
+### 直近コミット
+ecfc9bc [自動] CLAUDE.md重複ルール整理・圧縮
+975457d [自動] x_posts_cache.json 更新
+c7bb51d fix: モデル更新とworkflow_dispatchによるmorning-briefingリカバリ対応
+b742b42 feat: 朝のブリーフィングからAIニュースセクションを削除
+17322b1 chore: ワークフローから不要なxedge環境変数を削除
+
+### 未コミット変更
+ M CLAUDE.md
+?? buffer_copy.txt
+---
