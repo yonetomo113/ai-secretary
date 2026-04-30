@@ -25,8 +25,9 @@ from base64 import b64encode
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import anthropic
 import requests
+
+from llm_client import call_llm
 from dotenv import load_dotenv
 
 # ── パス定義 ──────────────────────────────────────────────────────
@@ -165,12 +166,6 @@ def read_latest_memo() -> str:
 # ── テーマ選定 ────────────────────────────────────────────────────
 
 def select_theme(x_posts: list[str], memo: str, today: date) -> str:
-    if not ANTHROPIC_API_KEY:
-        log("エラー: ANTHROPIC_API_KEY が未設定です")
-        sys.exit(1)
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
     context_parts = []
     if x_posts:
         posts_text = "\n".join(f"- {p}" for p in x_posts[:10])
@@ -183,9 +178,7 @@ def select_theme(x_posts: list[str], memo: str, today: date) -> str:
 
     context = "\n\n".join(context_parts)
 
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=200,
+    theme_line = call_llm(
         messages=[{"role": "user", "content": f"""旅館オーナー（米岡朋彦）のブログ記事テーマを1つ選んでください。
 
 {context}
@@ -194,10 +187,10 @@ def select_theme(x_posts: list[str], memo: str, today: date) -> str:
 
 上記のX投稿や業務メモを起点に、ブログ記事として自然に展開できるテーマを1つ選び、
 「テーマ: ○○」という形式で1行だけ返してください。
-「清掃チェックリスト」のような汎用テーマは避け、具体的なエピソードや気づきを軸にしてください。"""}]
-    )
-
-    theme_line = msg.content[0].text.strip()
+「清掃チェックリスト」のような汎用テーマは避け、具体的なエピソードや気づきを軸にしてください。"""}],
+        max_tokens=200,
+        anthropic_model="claude-haiku-4-5-20251001",
+    ).strip()
     theme = theme_line.split(":", 1)[-1].strip() if ":" in theme_line else theme_line
     log(f"  テーマ選定: {theme}")
     return theme
@@ -206,12 +199,6 @@ def select_theme(x_posts: list[str], memo: str, today: date) -> str:
 # ── 記事生成 ──────────────────────────────────────────────────────
 
 def generate_article(x_posts: list[str], theme: str, blog_style: str, today: date) -> dict:
-    if not ANTHROPIC_API_KEY:
-        log("エラー: ANTHROPIC_API_KEY が未設定です")
-        sys.exit(1)
-
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
     x_section = ""
     if x_posts:
         x_section = "【Xの直近投稿（記事の起点・雰囲気の参考）】\n" + "\n".join(f"- {p}" for p in x_posts[:8])
@@ -242,13 +229,11 @@ def generate_article(x_posts: list[str], theme: str, blog_style: str, today: dat
 空行
 本文（Markdown形式）"""
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
+    raw = call_llm(
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=4000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = message.content[0].text.strip()
+        anthropic_model="claude-sonnet-4-6",
+    ).strip()
     lines = raw.split("\n")
     title = ""
     body_start = 0

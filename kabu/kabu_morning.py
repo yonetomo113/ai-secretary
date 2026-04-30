@@ -15,10 +15,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-import anthropic
+
+from llm_client import call_llm
 
 from config import SYMBOLS, SYMBOL_NAMES
 from fetch import fetch_and_store
@@ -133,13 +135,11 @@ def analyze_with_claude(mail_subject: str, mail_body: str) -> str:
 
 簡潔に、各銘柄1〜2文で。"""
 
-    client = anthropic.Anthropic()
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1500,
+    return call_llm(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=1500,
+        anthropic_model="claude-sonnet-4-6",
     )
-    return response.content[0].text
 
 
 def run_technical_analysis() -> list[dict]:

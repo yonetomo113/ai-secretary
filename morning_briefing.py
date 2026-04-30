@@ -27,7 +27,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 
-import anthropic
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -38,6 +37,8 @@ try:
 except ImportError:
     sync_airbnb_to_pending = None
     load_pending = None
+
+from llm_client import call_llm
 
 # ── 設定 ──────────────────────────────────────────────────────────
 BASE_DIR    = Path(__file__).parent
@@ -300,9 +301,6 @@ def calendar_section(gkami_service):
 
 # ── Claude 要約 ───────────────────────────────────────────────────
 def summarize(raw_text: str) -> str:
-    if not ANTHROPIC_API_KEY:
-        return "（ANTHROPIC_API_KEY 未設定のため要約スキップ）"
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     prompt = f"""以下は有限会社クロスエッジ代表・米岡朋彦の朝のブリーフィングデータです。
 民泊・旅館（竹屋旅籠・登竜庵）の運営に関係する情報を優先し、
 今日やるべきことを箇条書きで簡潔にまとめてください。
@@ -319,13 +317,12 @@ def summarize(raw_text: str) -> str:
 - アクション不要な情報は省略
 - データが空またはアクション不要な情報のみの場合は「本日のアクションなし」と1行だけ出力
 """
-    msg = client.messages.create(
-        model=CLAUDE_MODEL,
+    return call_llm(
+        messages=[{"role": "user", "content": prompt}],
         max_tokens=512,
         system="あなたは有限会社クロスエッジの秘書AIです。出力は「・」始まりの箇条書きのみ。前置き・後書き・ヘッダーは一切書かない。",
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return msg.content[0].text.strip()
+        anthropic_model=CLAUDE_MODEL,
+    ).strip()
 
 
 # ── メール送信（Gmail API / g.kamifor OAuth）──────────────────────

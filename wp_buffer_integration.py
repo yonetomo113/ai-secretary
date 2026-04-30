@@ -27,8 +27,9 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import anthropic
 import requests
+
+from llm_client import call_llm
 
 try:
     from dotenv import load_dotenv
@@ -115,12 +116,9 @@ def select_theme(x_posts: list[str], today: datetime) -> str:
         log(f"  X投稿なし → フォールバックテーマ: {fallback}")
         return fallback
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     posts_text = "\n".join(f"- {p}" for p in x_posts[:10])
 
-    msg = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=150,
+    theme_line = call_llm(
         messages=[{"role": "user", "content": f"""旅館オーナー（米岡朋彦）のブログ記事テーマを1つ選んでください。
 
 【直近のX投稿】
@@ -130,10 +128,10 @@ def select_theme(x_posts: list[str], today: datetime) -> str:
 
 上記のX投稿を起点に、ブログ記事として自然に展開できる具体的なテーマを1つ選び、
 「テーマ: ○○」という形式で1行だけ返してください。
-「清掃チェックリスト」のような汎用テーマは避け、エピソードや気づきを軸にしてください。"""}]
-    )
-
-    theme_line = msg.content[0].text.strip()
+「清掃チェックリスト」のような汎用テーマは避け、エピソードや気づきを軸にしてください。"""}],
+        max_tokens=150,
+        anthropic_model=CLAUDE_MODEL,
+    ).strip()
     theme = theme_line.split(":", 1)[-1].strip() if ":" in theme_line else theme_line
     log(f"  テーマ選定: {theme}")
     return theme
@@ -190,14 +188,11 @@ TITLE: （SEOを意識したタイトル）
 （X/Twitter用SNSコピーを140字以内。ハッシュタグ2〜3個含む）
 """
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=2000,
+    text: str = call_llm(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=2000,
+        anthropic_model=CLAUDE_MODEL,
     )
-
-    text: str = message.content[0].text
     blog_raw    = _extract_section(text, "---BLOG---",   "---BUFFER---")
     buffer_part = _extract_section(text, "---BUFFER---", None)
 
